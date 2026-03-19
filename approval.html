@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Battlecard Approval — ExtendInsights</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f1f5f9; min-height: 100vh; }
+
+    /* ── Header ── */
+    .header { background: #1e293b; color: white; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
+    .header-logo { width: 32px; height: 32px; background: #3b82f6; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; }
+    .header-title { font-size: 16px; font-weight: 600; }
+    .header-sub { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+
+    /* ── Overlay ── */
+    #overlay { position: fixed; inset: 0; background: rgba(15,23,42,0.85); display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .overlay-card { background: white; border-radius: 16px; padding: 40px; max-width: 420px; width: 90%; text-align: center; box-shadow: 0 25px 60px rgba(0,0,0,0.3); }
+    .overlay-card h2 { font-size: 20px; color: #1e293b; margin-bottom: 8px; }
+    .overlay-card p { color: #64748b; font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
+    .btn-signin { background: #0078d4; color: white; border: none; padding: 12px 28px; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; width: 100%; transition: background 0.2s; }
+    .btn-signin:hover { background: #006cbe; }
+    .ms-logo { display: inline-block; margin-right: 8px; vertical-align: middle; }
+
+    /* ── Main layout ── */
+    .container { max-width: 860px; margin: 0 auto; padding: 24px 16px 60px; }
+    .page-title { font-size: 22px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
+    .page-sub { color: #64748b; font-size: 14px; margin-bottom: 24px; }
+
+    /* ── Alert banner ── */
+    #no-data-banner { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 10px; padding: 14px 18px; margin-bottom: 20px; font-size: 14px; color: #92400e; display: none; }
+
+    /* ── Card ── */
+    .card { background: white; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 20px; overflow: hidden; }
+    .card-header { background: #f8fafc; border-bottom: 1px solid #e2e8f0; padding: 14px 20px; font-size: 13px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 8px; }
+    .card-header .icon { font-size: 16px; }
+    .card-body { padding: 20px; display: grid; gap: 16px; }
+    .card-body.cols-2 { grid-template-columns: 1fr 1fr; }
+    .card-body.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+
+    /* ── Form fields ── */
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field.full { grid-column: 1 / -1; }
+    label { font-size: 12px; font-weight: 600; color: #374151; }
+    label .hint { font-weight: 400; color: #9ca3af; margin-left: 4px; }
+    input[type="text"], select, textarea { border: 1px solid #d1d5db; border-radius: 6px; padding: 8px 10px; font-size: 13px; color: #1e293b; background: white; transition: border-color 0.15s, box-shadow 0.15s; width: 100%; font-family: inherit; }
+    input[type="text"]:focus, select:focus, textarea:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+    textarea { resize: vertical; min-height: 80px; line-height: 1.5; }
+    select { cursor: pointer; }
+
+    /* ── Threat badge ── */
+    .threat-select { font-weight: 600; }
+    .threat-select option[value="HIGH"] { color: #dc2626; }
+    .threat-select option[value="MEDIUM"] { color: #d97706; }
+    .threat-select option[value="LOW"] { color: #16a34a; }
+
+    /* ── Action bar ── */
+    .action-bar { background: white; border-top: 1px solid #e2e8f0; position: sticky; bottom: 0; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; gap: 12px; box-shadow: 0 -4px 12px rgba(0,0,0,0.06); z-index: 10; }
+    .action-info { font-size: 13px; color: #64748b; }
+    .action-info strong { color: #1e293b; }
+    .action-buttons { display: flex; gap: 10px; }
+    .btn-reject { background: white; color: #dc2626; border: 1px solid #fca5a5; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+    .btn-reject:hover { background: #fef2f2; }
+    .btn-approve { background: #16a34a; color: white; border: none; padding: 10px 24px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.2s; display: flex; align-items: center; gap: 8px; }
+    .btn-approve:hover:not(:disabled) { background: #15803d; }
+    .btn-approve:disabled { background: #86efac; cursor: not-allowed; }
+    .spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.4); border-top-color: white; border-radius: 50%; animation: spin 0.7s linear infinite; display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Status banner ── */
+    #status-banner { display: none; border-radius: 10px; padding: 16px 20px; margin-bottom: 20px; font-size: 14px; font-weight: 500; }
+    #status-banner.success { background: #dcfce7; border: 1px solid #86efac; color: #166534; }
+    #status-banner.error { background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b; }
+
+    /* ── Color preview ── */
+    .color-wrap { display: flex; gap: 8px; align-items: center; }
+    .color-preview { width: 32px; height: 32px; border-radius: 6px; border: 1px solid #e2e8f0; flex-shrink: 0; }
+    .color-wrap input { flex: 1; }
+
+    /* ── Responsive ── */
+    @media (max-width: 600px) {
+      .card-body.cols-2, .card-body.cols-3 { grid-template-columns: 1fr; }
+      .action-bar { flex-direction: column; align-items: stretch; }
+      .action-buttons { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════ AUTH OVERLAY ══════════════════════ -->
+<div id="overlay">
+  <div class="overlay-card">
+    <div style="font-size:48px;margin-bottom:16px;">🛡️</div>
+    <h2>Battlecard Approval</h2>
+    <p>Sign in with your Microsoft account to review and approve competitor updates before they go live on the battlecard.</p>
+    <button class="btn-signin" id="signin-btn">
+      <span class="ms-logo">🔐</span> Sign in with Microsoft
+    </button>
+    <div id="auth-error" style="display:none;margin-top:16px;color:#dc2626;font-size:13px;"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ HEADER ══════════════════════ -->
+<div class="header">
+  <div class="header-logo">EI</div>
+  <div>
+    <div class="header-title">ExtendInsights Battlecard</div>
+    <div class="header-sub">Competitor Approval Workflow</div>
+  </div>
+</div>
+
+<!-- ══════════════════════ MAIN ══════════════════════ -->
+<div class="container">
+  <div id="status-banner"></div>
+  <div id="no-data-banner">⚠️ No competitor data found in the URL. You can fill in the form manually or paste the JSON from the Slack message.</div>
+
+  <div class="page-title" id="page-title">Review Competitor Update</div>
+  <div class="page-sub" id="page-sub">Review the proposed data below, make any edits, then approve or reject.</div>
+
+  <form id="approval-form">
+
+    <!-- ── Basic Info ── -->
+    <div class="card">
+      <div class="card-header"><span class="icon">🏢</span> Basic Information</div>
+      <div class="card-body cols-2">
+        <div class="field">
+          <label>Display Name <span class="hint">(shown on battlecard)</span></label>
+          <input type="text" id="f-competitor" placeholder="e.g. Coefficient" required>
+        </div>
+        <div class="field">
+          <label>Competitor ID <span class="hint">(slug, no spaces)</span></label>
+          <input type="text" id="f-competitorId" placeholder="e.g. coefficient">
+        </div>
+        <div class="field">
+          <label>Threat Level</label>
+          <select id="f-threatLevel" class="threat-select">
+            <option value="HIGH">HIGH</option>
+            <option value="MEDIUM">MEDIUM</option>
+            <option value="LOW">LOW</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Website</label>
+          <input type="text" id="f-website" placeholder="https://coefficient.io">
+        </div>
+        <div class="field">
+          <label>Accent Color <span class="hint">(hex)</span></label>
+          <div class="color-wrap">
+            <div class="color-preview" id="color-preview"></div>
+            <input type="text" id="f-accentColor" placeholder="#6366F1" oninput="updateColorPreview()">
+          </div>
+        </div>
+        <div class="field">
+          <label>Sort Order <span class="hint">(1=first)</span></label>
+          <input type="text" id="f-sortOrder" placeholder="1">
+        </div>
+        <div class="field full">
+          <label>Tagline</label>
+          <input type="text" id="f-tagline" placeholder="Their headline tagline">
+        </div>
+        <div class="field full">
+          <label>Positioning</label>
+          <input type="text" id="f-positioning" placeholder="How they position themselves">
+        </div>
+        <div class="field full">
+          <label>Audience <span class="hint">(pipe-separated)</span></label>
+          <input type="text" id="f-audience" placeholder="Sales Ops|FP&A|Marketing">
+        </div>
+        <div class="field full">
+          <label>Pricing</label>
+          <input type="text" id="f-pricing" placeholder="Free tier|$49/mo|No NetSuite required">
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Competitive Intel ── -->
+    <div class="card">
+      <div class="card-header"><span class="icon">⚔️</span> Competitive Intelligence</div>
+      <div class="card-body">
+        <div class="field">
+          <label>Strengths <span class="hint">(one per line)</span></label>
+          <textarea id="f-strengths" rows="4" placeholder="Strength one&#10;Strength two&#10;Strength three"></textarea>
+        </div>
+        <div class="field">
+          <label>Weaknesses <span class="hint">(one per line)</span></label>
+          <textarea id="f-weaknesses" rows="4" placeholder="Weakness one&#10;Weakness two&#10;Weakness three"></textarea>
+        </div>
+        <div class="field">
+          <label>Special Warning <span class="hint">(amber box — leave blank if none)</span></label>
+          <textarea id="f-specialWarning" rows="2" placeholder="e.g. They recently raised $20M and are expanding NetSuite coverage"></textarea>
+        </div>
+        <div class="field">
+          <label>Misleading Claims <span class="hint">(red box — leave blank if none)</span></label>
+          <textarea id="f-misleadingClaims" rows="2" placeholder="e.g. Claims native NetSuite integration but requires middleware"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Messaging Matrix ── -->
+    <div class="card">
+      <div class="card-header"><span class="icon">💬</span> Messaging Matrix</div>
+      <div class="card-body cols-2">
+        <div class="field">
+          <label>Tagline / Headline</label>
+          <input type="text" id="f-msgTagline" placeholder="Their messaging tagline">
+        </div>
+        <div class="field">
+          <label>Core Value Prop</label>
+          <input type="text" id="f-msgValueProp" placeholder="Their core value proposition">
+        </div>
+        <div class="field">
+          <label>Primary Audience</label>
+          <input type="text" id="f-msgAudience" placeholder="Their target audience">
+        </div>
+        <div class="field">
+          <label>Key Differentiator</label>
+          <input type="text" id="f-msgDiff" placeholder="Their key differentiator claim">
+        </div>
+        <div class="field">
+          <label>Category Framing</label>
+          <input type="text" id="f-msgCategory" placeholder="How they frame their product category">
+        </div>
+        <div class="field">
+          <label>Tone & Voice</label>
+          <input type="text" id="f-msgTone" placeholder="e.g. Technical, friendly, enterprise">
+        </div>
+        <div class="field full">
+          <label>Proof Points</label>
+          <input type="text" id="f-msgProof" placeholder="Customers, reviews, stats they highlight">
+        </div>
+        <div class="field">
+          <label>Pricing Messaging</label>
+          <input type="text" id="f-msgPricing" placeholder="How they talk about pricing">
+        </div>
+        <div class="field">
+          <label>Primary CTA</label>
+          <input type="text" id="f-msgCta" placeholder="e.g. Start free trial">
+        </div>
+        <div class="field">
+          <label>NetSuite Support</label>
+          <input type="text" id="f-msgNetSuite" placeholder="How they talk about NetSuite">
+        </div>
+        <div class="field">
+          <label>Writeback / Sync</label>
+          <input type="text" id="f-msgWriteBack" placeholder="How they talk about bidirectional sync">
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Positioning Map ── -->
+    <div class="card">
+      <div class="card-header"><span class="icon">🗺️</span> Positioning Map</div>
+      <div class="card-body cols-3">
+        <div class="field">
+          <label>X Position <span class="hint">(0=niche, 100=broad)</span></label>
+          <input type="text" id="f-posX" placeholder="50">
+        </div>
+        <div class="field">
+          <label>Y Position <span class="hint">(0=enterprise, 100=SMB)</span></label>
+          <input type="text" id="f-posY" placeholder="50">
+        </div>
+        <div class="field">
+          <label>Source</label>
+          <input type="text" id="f-source" placeholder="monthly-research">
+        </div>
+      </div>
+    </div>
+
+  </form>
+</div>
+
+<!-- ══════════════════════ ACTION BAR ══════════════════════ -->
+<div class="action-bar" id="action-bar" style="display:none;">
+  <div class="action-info">
+    Approving as <strong id="user-display-name">...</strong>
+  </div>
+  <div class="action-buttons">
+    <button class="btn-reject" id="reject-btn">✕ Reject</button>
+    <button class="btn-approve" id="approve-btn">
+      <div class="spinner" id="approve-spinner"></div>
+      <span id="approve-label">✓ Approve & Save to SharePoint</span>
+    </button>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+//  CONFIG — paste your Azure AD values here
+// ══════════════════════════════════════════════════════════════
+const OAUTH = {
+  clientId: 'PASTE_CLIENT_ID_HERE',
+  tenantId: 'PASTE_TENANT_ID_HERE',
+  scopes:   'https://cloudextend.sharepoint.com/AllSites.Read https://cloudextend.sharepoint.com/AllSites.Write openid profile',
+  redirectUri: window.location.origin + window.location.pathname
+};
+
+const SP = {
+  siteUrl:  'https://cloudextend.sharepoint.com/sites/Sales2',
+  listName: 'CompetitorData'
+};
+
+// ══════════════════════════════════════════════════════════════
+//  OAuth2 PKCE helpers  (same pattern as main battlecard)
+// ══════════════════════════════════════════════════════════════
+function b64url(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+async function generateVerifier() {
+  const buf = crypto.getRandomValues(new Uint8Array(32));
+  return b64url(buf);
+}
+async function generateChallenge(v) {
+  const enc = new TextEncoder().encode(v);
+  const hash = await crypto.subtle.digest('SHA-256', enc);
+  return b64url(hash);
+}
+
+function signIn() {
+  if (OAUTH.clientId === 'PASTE_CLIENT_ID_HERE') {
+    document.getElementById('auth-error').style.display = 'block';
+    document.getElementById('auth-error').textContent = 'Config error: clientId and tenantId have not been filled in.';
+    return;
+  }
+  generateVerifier().then(async verifier => {
+    const challenge = await generateChallenge(verifier);
+    sessionStorage.setItem('pkce_verifier', verifier);
+    // Preserve the hash data across the redirect
+    const hashData = window.location.hash;
+    if (hashData) sessionStorage.setItem('approval_hash', hashData);
+    const params = new URLSearchParams({
+      client_id:             OAUTH.clientId,
+      response_type:         'code',
+      redirect_uri:          OAUTH.redirectUri,
+      scope:                 OAUTH.scopes,
+      code_challenge:        challenge,
+      code_challenge_method: 'S256',
+      prompt:                'select_account'
+    });
+    window.location = `https://login.microsoftonline.com/${OAUTH.tenantId}/oauth2/v2.0/authorize?${params}`;
+  });
+}
+
+async function exchangeCode(code) {
+  const verifier = sessionStorage.getItem('pkce_verifier');
+  const body = new URLSearchParams({
+    client_id:     OAUTH.clientId,
+    grant_type:    'authorization_code',
+    code,
+    redirect_uri:  OAUTH.redirectUri,
+    code_verifier: verifier,
+    scope:         OAUTH.scopes
+  });
+  const resp = await fetch(
+    `https://login.microsoftonline.com/${OAUTH.tenantId}/oauth2/v2.0/token`,
+    { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body }
+  );
+  const data = await resp.json();
+  if (data.access_token) {
+    sessionStorage.setItem('sp_token', data.access_token);
+    // Store expiry
+    sessionStorage.setItem('sp_token_exp', Date.now() + (data.expires_in - 60) * 1000);
+    // Get display name from id_token
+    if (data.id_token) {
+      try {
+        const payload = JSON.parse(atob(data.id_token.split('.')[1]));
+        sessionStorage.setItem('user_name', payload.name || payload.preferred_username || 'Unknown');
+      } catch(e) {}
+    }
+  }
+  return data.access_token;
+}
+
+function getToken() {
+  const exp = sessionStorage.getItem('sp_token_exp');
+  if (exp && Date.now() < Number(exp)) return sessionStorage.getItem('sp_token');
+  return null;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Color preview
+// ══════════════════════════════════════════════════════════════
+function updateColorPreview() {
+  const val = document.getElementById('f-accentColor').value;
+  document.getElementById('color-preview').style.background = val || '#e2e8f0';
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Pre-fill form from URL hash  (#d=BASE64)
+// ══════════════════════════════════════════════════════════════
+function loadFromHash() {
+  let hash = window.location.hash;
+  // If hash was saved before redirect, restore it
+  const saved = sessionStorage.getItem('approval_hash');
+  if (saved && !hash) { hash = saved; }
+  if (saved) { sessionStorage.removeItem('approval_hash'); }
+  if (!hash) {
+    document.getElementById('no-data-banner').style.display = 'block';
+    return;
+  }
+  try {
+    const raw = hash.replace(/^#d=/, '');
+    const json = decodeURIComponent(atob(raw));
+    const data = JSON.parse(json);
+    fillForm(data);
+    document.getElementById('page-title').textContent =
+      `Review: ${data.competitor || 'New Competitor'}`;
+    document.getElementById('page-sub').textContent =
+      `Source: ${data.source || 'unknown'} · Review all fields before approving.`;
+  } catch(e) {
+    document.getElementById('no-data-banner').style.display = 'block';
+    document.getElementById('no-data-banner').textContent =
+      '⚠️ Could not decode competitor data from link. Fill in the form manually.';
+  }
+}
+
+function fillForm(d) {
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && val !== undefined && val !== null) el.value = val;
+  };
+  set('f-competitor',      d.competitor);
+  set('f-competitorId',    d.competitorId);
+  set('f-threatLevel',     d.threatLevel);
+  set('f-accentColor',     d.accentColor);
+  set('f-website',         d.website);
+  set('f-tagline',         d.tagline);
+  set('f-positioning',     d.positioning);
+  set('f-audience',        d.audience);
+  set('f-pricing',         d.pricing);
+  set('f-strengths',       d.strengths);
+  set('f-weaknesses',      d.weaknesses);
+  set('f-specialWarning',  d.specialWarning);
+  set('f-misleadingClaims',d.misleadingClaims);
+  set('f-msgTagline',      d.msgTagline);
+  set('f-msgValueProp',    d.msgValueProp);
+  set('f-msgAudience',     d.msgAudience);
+  set('f-msgDiff',         d.msgDiff);
+  set('f-msgCategory',     d.msgCategory);
+  set('f-msgTone',         d.msgTone);
+  set('f-msgProof',        d.msgProof);
+  set('f-msgPricing',      d.msgPricing);
+  set('f-msgCta',          d.msgCta);
+  set('f-msgNetSuite',     d.msgNetSuite);
+  set('f-msgWriteBack',    d.msgWriteBack);
+  set('f-posX',            d.posX);
+  set('f-posY',            d.posY);
+  set('f-sortOrder',       d.sortOrder);
+  set('f-source',          d.source);
+  updateColorPreview();
+}
+
+function readForm() {
+  const v = id => document.getElementById(id).value.trim();
+  return {
+    Title:            v('f-competitor'),
+    CompetitorID:     v('f-competitorId'),
+    ThreatLevelValue: v('f-threatLevel'),
+    AccentColor:      v('f-accentColor'),
+    Website:          v('f-website'),
+    Tagline:          v('f-tagline'),
+    Positioning:      v('f-positioning'),
+    Audience:         v('f-audience'),
+    Pricing:          v('f-pricing'),
+    Strengths:        v('f-strengths'),
+    Weaknesses:       v('f-weaknesses'),
+    SpecialWarning:   v('f-specialWarning'),
+    MisleadingClaims: v('f-misleadingClaims'),
+    MsgTagline:       v('f-msgTagline'),
+    MsgValueProp:     v('f-msgValueProp'),
+    MsgAudience:      v('f-msgAudience'),
+    MsgDiff:          v('f-msgDiff'),
+    MsgCategory:      v('f-msgCategory'),
+    MsgTone:          v('f-msgTone'),
+    MsgProof:         v('f-msgProof'),
+    MsgPricing:       v('f-msgPricing'),
+    MsgCTA:           v('f-msgCta'),
+    MsgNetSuite:      v('f-msgNetSuite'),
+    MsgWriteBack:     v('f-msgWriteBack'),
+    PosX:             parseInt(v('f-posX')) || 50,
+    PosY:             parseInt(v('f-posY')) || 50,
+    SortOrder:        parseInt(v('f-sortOrder')) || 1,
+    IsActive:         true
+  };
+}
+
+// ══════════════════════════════════════════════════════════════
+//  SharePoint REST API helpers
+// ══════════════════════════════════════════════════════════════
+const spHeaders = token => ({
+  'Authorization': `Bearer ${token}`,
+  'Accept':        'application/json;odata=nometadata',
+  'Content-Type':  'application/json;odata=nometadata'
+});
+
+async function findExistingItem(token, title) {
+  const url = `${SP.siteUrl}/_api/web/lists/getbytitle('${encodeURIComponent(SP.listName)}')/items` +
+    `?$filter=Title eq '${encodeURIComponent(title)}'&$select=Id&$top=1`;
+  const resp = await fetch(url, { headers: spHeaders(token) });
+  const data = await resp.json();
+  return data.value && data.value.length > 0 ? data.value[0].Id : null;
+}
+
+async function createItem(token, payload) {
+  const url = `${SP.siteUrl}/_api/web/lists/getbytitle('${encodeURIComponent(SP.listName)}')/items`;
+  const resp = await fetch(url, {
+    method:  'POST',
+    headers: spHeaders(token),
+    body:    JSON.stringify(payload)
+  });
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`Create failed (${resp.status}): ${err}`);
+  }
+  return resp.json();
+}
+
+async function updateItem(token, itemId, payload) {
+  const url = `${SP.siteUrl}/_api/web/lists/getbytitle('${encodeURIComponent(SP.listName)}')/items(${itemId})`;
+  const resp = await fetch(url, {
+    method:  'POST',
+    headers: { ...spHeaders(token), 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE' },
+    body:    JSON.stringify(payload)
+  });
+  // MERGE returns 204 No Content on success
+  if (!resp.ok && resp.status !== 204) {
+    const err = await resp.text();
+    throw new Error(`Update failed (${resp.status}): ${err}`);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Show/hide status banner
+// ══════════════════════════════════════════════════════════════
+function showStatus(type, msg) {
+  const el = document.getElementById('status-banner');
+  el.className = type;
+  el.textContent = msg;
+  el.style.display = 'block';
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Approve handler
+// ══════════════════════════════════════════════════════════════
+async function handleApprove() {
+  const token = getToken();
+  if (!token) { showStatus('error', 'Session expired. Please refresh and sign in again.'); return; }
+
+  const btn     = document.getElementById('approve-btn');
+  const spinner = document.getElementById('approve-spinner');
+  const label   = document.getElementById('approve-label');
+
+  btn.disabled    = true;
+  spinner.style.display = 'block';
+  label.textContent     = 'Saving to SharePoint…';
+
+  try {
+    const payload   = readForm();
+    const title     = payload.Title;
+    if (!title) throw new Error('Competitor name (Title) is required.');
+
+    const existingId = await findExistingItem(token, title);
+
+    if (existingId) {
+      await updateItem(token, existingId, payload);
+      showStatus('success', `✅ "${title}" updated successfully in SharePoint. The battlecard will reflect this on next load.`);
+    } else {
+      await createItem(token, payload);
+      showStatus('success', `✅ "${title}" added to SharePoint. The battlecard will show this competitor on next load.`);
+    }
+
+    label.textContent = '✓ Saved!';
+    document.getElementById('reject-btn').style.display = 'none';
+
+  } catch(e) {
+    console.error(e);
+    showStatus('error', `❌ Error: ${e.message}\n\nCheck the browser console for details. You may need to verify the SharePoint column names match what's in the code.`);
+    btn.disabled = false;
+    spinner.style.display = 'none';
+    label.textContent = '✓ Approve & Save to SharePoint';
+  }
+}
+
+function handleReject() {
+  if (confirm('Reject this competitor update? It will not be saved to SharePoint.')) {
+    showStatus('error', '✕ Update rejected. Nothing was saved to SharePoint.');
+    document.getElementById('action-bar').style.display = 'none';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Bootstrap
+// ══════════════════════════════════════════════════════════════
+(async function bootstrap() {
+  const params = new URLSearchParams(window.location.search);
+  const code   = params.get('code');
+
+  if (code) {
+    // Came back from Microsoft login — exchange code for token
+    try {
+      history.replaceState({}, '', window.location.pathname);
+      await exchangeCode(code);
+    } catch(e) {
+      document.getElementById('auth-error').style.display = 'block';
+      document.getElementById('auth-error').textContent = 'Auth error: ' + e.message;
+      return;
+    }
+  }
+
+  const token = getToken();
+
+  if (!token) {
+    // Show login overlay
+    document.getElementById('overlay').style.display = 'flex';
+    document.getElementById('signin-btn').addEventListener('click', signIn);
+    return;
+  }
+
+  // ── Authenticated ──
+  document.getElementById('overlay').style.display = 'none';
+  document.getElementById('action-bar').style.display = 'flex';
+  document.getElementById('user-display-name').textContent =
+    sessionStorage.getItem('user_name') || 'you';
+
+  // Wire buttons
+  document.getElementById('approve-btn').addEventListener('click', handleApprove);
+  document.getElementById('reject-btn').addEventListener('click', handleReject);
+
+  // Restore hash after redirect and fill form
+  const savedHash = sessionStorage.getItem('approval_hash');
+  if (savedHash && !window.location.hash) {
+    history.replaceState({}, '', window.location.pathname + savedHash);
+    sessionStorage.removeItem('approval_hash');
+  }
+  loadFromHash();
+})();
+</script>
+</body>
+</html>
