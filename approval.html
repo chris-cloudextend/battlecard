@@ -312,8 +312,8 @@
 //  CONFIG — paste your Azure AD values here
 // ══════════════════════════════════════════════════════════════
 const OAUTH = {
-  clientId: '09548676-e97d-4d97-990f-64122e8a91c1',
-  tenantId: '60003fa7-209d-4a7d-8c8c-4c6d5eda32bb',
+  clientId: 'PASTE_CLIENT_ID_HERE',
+  tenantId: 'PASTE_TENANT_ID_HERE',
   scopes:   'https://cloudextend.sharepoint.com/AllSites.Read https://cloudextend.sharepoint.com/AllSites.Write openid profile',
   redirectUri: window.location.origin + window.location.pathname
 };
@@ -349,10 +349,12 @@ function signIn() {
   generateVerifier().then(async verifier => {
     const challenge = await generateChallenge(verifier);
     sessionStorage.setItem('pkce_verifier', verifier);
-    // Save ?d= param so it survives the OAuth redirect
+    // Save ?z= or ?d= param so it survives the OAuth redirect
     const urlParams = new URLSearchParams(window.location.search);
+    const z = urlParams.get('z');
     const d = urlParams.get('d');
-    if (d) sessionStorage.setItem('approval_data', d);
+    if (z) sessionStorage.setItem('approval_z', z);
+    else if (d) sessionStorage.setItem('approval_data', d);
     const params = new URLSearchParams({
       client_id:             OAUTH.clientId,
       response_type:         'code',
@@ -453,23 +455,77 @@ function initJsonPaste() {
 //  Load data from URL param ?d= or sessionStorage
 //  (Slack preserves ?query params but strips #hash fragments)
 // ══════════════════════════════════════════════════════════════
-function loadData() {
-  // Check ?d= param first, then sessionStorage (survives OAuth redirect)
+// ══════════════════════════════════════════════════════════════
+//  URL data loading — two supported formats:
+//    ?z=  zlib-compressed base64url JSON  (new, compact ~1.5KB URLs)
+//    ?d=  plain base64url JSON            (legacy, kept for compat)
+// ══════════════════════════════════════════════════════════════
+
+// Decode base64url string to Uint8Array
+function b64urlToBytes(raw) {
+  const b64 = raw.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64 + '=='.slice(0, (4 - b64.length % 4) % 4);
+  return Uint8Array.from(atob(padded), c => c.charCodeAt(0));
+}
+
+// Decompress zlib bytes using DecompressionStream (supported in all modern browsers)
+async function zlibDecompress(bytes) {
+  const ds = new DecompressionStream('deflate');
+  const writer = ds.writable.getWriter();
+  writer.write(bytes);
+  writer.close();
+  const chunks = [];
+  const reader = ds.readable.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const total = chunks.reduce((a, c) => a + c.length, 0);
+  const buf = new Uint8Array(total);
+  let pos = 0;
+  for (const c of chunks) { buf.set(c, pos); pos += c.length; }
+  return new TextDecoder().decode(buf);
+}
+
+// Decode plain ?d= value (base64url → JSON, with legacy fallback)
+function decodePlain(raw) {
+  try { return JSON.parse(new TextDecoder().decode(b64urlToBytes(raw))); } catch(e1) {}
+  try { return JSON.parse(decodeURIComponent(atob(raw))); } catch(e2) {}
+  return null;
+}
+
+function applyData(data) {
+  fillForm(data);
+  document.getElementById('json-paste-card').style.display = 'none';
+  const name = data.Title || data.competitor || 'New Competitor';
+  document.getElementById('page-title').textContent = `Review: ${name}`;
+  document.getElementById('page-sub').textContent =
+    `Source: ${data.source || 'Monthly Research'} · Review all fields before approving.`;
+}
+
+async function loadData() {
   const params = new URLSearchParams(window.location.search);
-  const raw = params.get('d') || sessionStorage.getItem('approval_data');
-  if (raw) sessionStorage.removeItem('approval_data');
-  if (!raw) return; // no data — form stays empty, paste box is available
-  try {
-    const json = decodeURIComponent(atob(raw));
-    const data = JSON.parse(json);
-    fillForm(data);
-    document.getElementById('json-paste-card').style.display = 'none'; // hide paste box
-    document.getElementById('page-title').textContent =
-      `Review: ${data.competitor || 'New Competitor'}`;
-    document.getElementById('page-sub').textContent =
-      `Source: ${data.source || 'unknown'} · Review all fields before approving.`;
-  } catch(e) {
-    // silently fall through — paste box remains visible
+
+  // ── Compressed format: ?z= ───────────────────────────────
+  const zRaw = params.get('z') || sessionStorage.getItem('approval_z');
+  if (zRaw) {
+    sessionStorage.removeItem('approval_z');
+    try {
+      const json = await zlibDecompress(b64urlToBytes(zRaw));
+      applyData(JSON.parse(json));
+    } catch(e) { /* fall through to paste box */ }
+    return;
+  }
+
+  // ── Plain format: ?d= (base64url or legacy) ──────────────
+  const dRaw = params.get('d') || sessionStorage.getItem('approval_data');
+  if (dRaw) {
+    sessionStorage.removeItem('approval_data');
+    try {
+      const data = decodePlain(dRaw);
+      if (data) applyData(data);
+    } catch(e) { /* fall through to paste box */ }
   }
 }
 
@@ -478,33 +534,34 @@ function fillForm(d) {
     const el = document.getElementById(id);
     if (el && val !== undefined && val !== null) el.value = val;
   };
-  set('f-competitor',      d.competitor);
-  set('f-competitorId',    d.competitorId);
-  set('f-threatLevel',     d.threatLevel);
-  set('f-accentColor',     d.accentColor);
-  set('f-website',         d.website);
-  set('f-tagline',         d.tagline);
-  set('f-positioning',     d.positioning);
-  set('f-audience',        d.audience);
-  set('f-pricing',         d.pricing);
-  set('f-strengths',       d.strengths);
-  set('f-weaknesses',      d.weaknesses);
-  set('f-specialWarning',  d.specialWarning);
-  set('f-misleadingClaims',d.misleadingClaims);
-  set('f-msgTagline',      d.msgTagline);
-  set('f-msgValueProp',    d.msgValueProp);
-  set('f-msgAudience',     d.msgAudience);
-  set('f-msgDiff',         d.msgDiff);
-  set('f-msgCategory',     d.msgCategory);
-  set('f-msgTone',         d.msgTone);
-  set('f-msgProof',        d.msgProof);
-  set('f-msgPricing',      d.msgPricing);
-  set('f-msgCta',          d.msgCta);
-  set('f-msgNetSuite',     d.msgNetSuite);
-  set('f-msgWriteBack',    d.msgWriteBack);
-  set('f-posX',            d.posX);
-  set('f-posY',            d.posY);
-  set('f-sortOrder',       d.sortOrder);
+  // Accept both PascalCase (from Python/SharePoint) and camelCase (from JSON paste)
+  set('f-competitor',      d.Title         || d.competitor);
+  set('f-competitorId',    d.CompetitorID  || d.competitorId);
+  set('f-threatLevel',     d.ThreatLevel   || d.threatLevel);
+  set('f-accentColor',     d.AccentColor   || d.accentColor);
+  set('f-website',         d.Website       || d.website);
+  set('f-tagline',         d.Tagline       || d.tagline);
+  set('f-positioning',     d.Positioning   || d.positioning);
+  set('f-audience',        d.Audience      || d.audience);
+  set('f-pricing',         d.Pricing       || d.pricing);
+  set('f-strengths',       d.Strengths     || d.strengths);
+  set('f-weaknesses',      d.Weaknesses    || d.weaknesses);
+  set('f-specialWarning',  d.SpecialWarning   || d.specialWarning);
+  set('f-misleadingClaims',d.MisleadingClaims || d.misleadingClaims);
+  set('f-msgTagline',      d.MsgTagline    || d.msgTagline);
+  set('f-msgValueProp',    d.MsgValueProp  || d.msgValueProp);
+  set('f-msgAudience',     d.MsgAudience   || d.msgAudience);
+  set('f-msgDiff',         d.MsgDiff       || d.msgDiff);
+  set('f-msgCategory',     d.MsgCategory   || d.msgCategory);
+  set('f-msgTone',         d.MsgTone       || d.msgTone);
+  set('f-msgProof',        d.MsgProof      || d.msgProof);
+  set('f-msgPricing',      d.MsgPricing    || d.msgPricing);
+  set('f-msgCta',          d.MsgCTA        || d.MsgCta || d.msgCta);
+  set('f-msgNetSuite',     d.MsgNetSuite   || d.msgNetSuite);
+  set('f-msgWriteBack',    d.MsgWriteBack  || d.msgWriteBack);
+  set('f-posX',            d.PosX          ?? d.posX);
+  set('f-posY',            d.PosY          ?? d.posY);
+  set('f-sortOrder',       d.SortOrder     ?? d.sortOrder);
   set('f-source',          d.source);
   updateColorPreview();
 }
