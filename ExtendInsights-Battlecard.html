@@ -4,8 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ExtendInsights — Competitive Battlecard</title>
-<!-- Microsoft Authentication Library (MSAL.js) -->
-<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2/lib/msal-browser.min.js"></script>
+<!-- No external auth library needed — we use OAuth2 PKCE directly -->
 <style>
   /* ─── DESIGN TOKENS ─────────────────────────────────────────────────────── */
   :root {
@@ -367,26 +366,100 @@
 <script>
 'use strict';
 
-/* ── AUTH CONFIG ─────────────────────────────────────────────────────────────
-   Fill these in after completing the Azure AD app registration.
-   See GitHub-Setup-Guide.md → Step 2 for exact instructions.
-   ─────────────────────────────────────────────────────────────────────────── */
-const AUTH_CONFIG = {
-  clientId:  '09548676-e97d-4d97-990f-64122e8a91c1',   // Application (client) ID from Azure AD
-  tenantId:  '60003fa7-209d-4a7d-8c8c-4c6d5eda32bb',   // Directory (tenant) ID from Azure AD
-  // Redirect URI — update this to match your GitHub Pages URL exactly
-  // e.g. 'https://celigo.github.io/battlecard/'  (must match Azure AD registration)
+/* ══════════════════════════════════════════════════════════════════════════════
+   AUTH + DATA CONFIG
+   Fill in clientId and tenantId from your Azure AD app registration.
+   Everything else is automatic.
+   ══════════════════════════════════════════════════════════════════════════════ */
+const OAUTH = {
+  clientId:    'PASTE_CLIENT_ID_HERE',   // Application (client) ID from Azure AD
+  tenantId:    'PASTE_TENANT_ID_HERE',   // Directory (tenant) ID from Azure AD
+  scopes:      'https://cloudextend.sharepoint.com/AllSites.Read openid profile',
   redirectUri: window.location.origin + window.location.pathname,
-  scopes: ['https://cloudextend.sharepoint.com/AllSites.Read'],
 };
 
-/* ── DATA CONFIG ─────────────────────────────────────────────────────────────
-   SharePoint site and list to read competitor data from.
-   ─────────────────────────────────────────────────────────────────────────── */
 const CONFIG = {
   siteUrl:  'https://cloudextend.sharepoint.com/sites/Sales2',
   listName: 'CompetitorData',
 };
+
+/* ── PKCE HELPERS (no external library needed) ────────────────────────────── */
+function generateVerifier() {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return btoa(String.fromCharCode(...arr))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+async function generateChallenge(verifier) {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  return btoa(String.fromCharCode(...new Uint8Array(hash)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+/* ── AUTH ACTIONS ─────────────────────────────────────────────────────────── */
+async function signIn() {
+  const verifier   = generateVerifier();
+  const challenge  = await generateChallenge(verifier);
+  sessionStorage.setItem('pkce_verifier', verifier);
+  const params = new URLSearchParams({
+    client_id:             OAUTH.clientId,
+    response_type:         'code',
+    redirect_uri:          OAUTH.redirectUri,
+    scope:                 OAUTH.scopes,
+    code_challenge:        challenge,
+    code_challenge_method: 'S256',
+    response_mode:         'query',
+  });
+  window.location.href =
+    `https://login.microsoftonline.com/${OAUTH.tenantId}/oauth2/v2.0/authorize?${params}`;
+}
+
+function signOut() {
+  sessionStorage.removeItem('battlecard_token');
+  sessionStorage.removeItem('battlecard_expiry');
+  window.location.href =
+    `https://login.microsoftonline.com/${OAUTH.tenantId}/oauth2/v2.0/logout` +
+    `?post_logout_redirect_uri=${encodeURIComponent(OAUTH.redirectUri)}`;
+}
+
+async function exchangeCode(code) {
+  const verifier = sessionStorage.getItem('pkce_verifier');
+  sessionStorage.removeItem('pkce_verifier');
+  const resp = await fetch(
+    `https://login.microsoftonline.com/${OAUTH.tenantId}/oauth2/v2.0/token`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id:     OAUTH.clientId,
+        grant_type:    'authorization_code',
+        code,
+        redirect_uri:  OAUTH.redirectUri,
+        code_verifier: verifier,
+        scope:         OAUTH.scopes,
+      }),
+    }
+  );
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error_description || `Token exchange failed (HTTP ${resp.status})`);
+  }
+  const data = await resp.json();
+  sessionStorage.setItem('battlecard_token',  data.access_token);
+  sessionStorage.setItem('battlecard_expiry', String(Date.now() + data.expires_in * 1000));
+}
+
+function getStoredToken() {
+  const token  = sessionStorage.getItem('battlecard_token');
+  const expiry = parseInt(sessionStorage.getItem('battlecard_expiry') || '0', 10);
+  return (token && Date.now() < expiry - 60000) ? token : null;
+}
+
+async function acquireToken() {
+  const t = getStoredToken();
+  if (!t) throw new Error('NOT_SIGNED_IN');
+  return t;
+}
 
 /* ── OUR MESSAGING (ExtendInsights column in the matrix) ─────────────────── */
 const OUR_MSG = {
@@ -417,69 +490,7 @@ const MATRIX_ROWS = [
   { label: 'Write-Back to NetSuite',  key: 'MsgWriteBack' },
 ];
 
-/* ── MSAL INSTANCE ────────────────────────────────────────────────────────── */
-// Declared here, created inside bootstrap() so any constructor errors are caught
-let msalInstance = null;
-
 const MS_ICON = `<svg width="20" height="20" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg> Sign in with Microsoft`;
-
-/* ── AUTH ACTIONS ─────────────────────────────────────────────────────────── */
-async function signIn() {
-  if (!msalInstance) {
-    document.getElementById('login-status').textContent = 'Still starting up — please wait a moment and try again.';
-    return;
-  }
-  const btn = document.getElementById('btn-signin');
-  const status = document.getElementById('login-status');
-  btn.disabled = true;
-  btn.textContent = 'Opening Microsoft login…';
-  status.textContent = '';
-  try {
-    await msalInstance.loginPopup({ scopes: AUTH_CONFIG.scopes });
-    document.getElementById('login-overlay').style.display = 'none';
-    document.getElementById('btn-signout').style.display = 'inline-block';
-    init();
-  } catch (e) {
-    btn.disabled = false;
-    btn.innerHTML = MS_ICON;
-    if (e.errorCode === 'popup_window_error') {
-      status.textContent = '⚠️ Popup blocked — please allow popups for this site and try again.';
-    } else if (e.errorCode === 'user_cancelled') {
-      status.textContent = 'Sign-in cancelled.';
-    } else {
-      status.textContent = `Sign-in error: ${e.message}`;
-    }
-  }
-}
-
-function signOut() {
-  if (!msalInstance) return;
-  const accounts = msalInstance.getAllAccounts();
-  if (accounts.length > 0) {
-    msalInstance.logoutPopup({ account: accounts[0] }).then(() => {
-      window.location.reload();
-    });
-  }
-}
-
-async function acquireToken() {
-  if (!msalInstance) throw new Error('MSAL not initialized');
-  const accounts = msalInstance.getAllAccounts();
-  if (!accounts.length) throw new Error('NOT_SIGNED_IN');
-  try {
-    const result = await msalInstance.acquireTokenSilent({
-      scopes: AUTH_CONFIG.scopes,
-      account: accounts[0],
-    });
-    return result.accessToken;
-  } catch (e) {
-    // Silent token acquisition failed — try popup
-    const result = await msalInstance.acquireTokenPopup({
-      scopes: AUTH_CONFIG.scopes,
-    });
-    return result.accessToken;
-  }
-}
 
 /* ── SHAREPOINT REST API FETCH ─────────────────────────────────────────────── */
 async function fetchCompetitors() {
@@ -766,43 +777,44 @@ async function init() {
 (async function bootstrap() {
   const statusEl  = document.getElementById('login-status');
   const signinBtn = document.getElementById('btn-signin');
-  try {
-    // Create MSAL inside bootstrap so any constructor errors are safely caught
-    msalInstance = new msal.PublicClientApplication({
-      auth: {
-        clientId:    AUTH_CONFIG.clientId,
-        authority:   `https://login.microsoftonline.com/${AUTH_CONFIG.tenantId}`,
-        redirectUri: AUTH_CONFIG.redirectUri,
-      },
-      cache: {
-        cacheLocation: 'sessionStorage',
-        storeAuthStateInCookie: false,
-      },
-    });
 
-    await msalInstance.initialize();
-
-    // MSAL is ready — enable the sign-in button
+  function showLogin(msg) {
+    document.getElementById('login-overlay').style.display = 'flex';
     if (signinBtn) { signinBtn.disabled = false; signinBtn.innerHTML = MS_ICON; }
+    if (msg && statusEl) statusEl.textContent = msg;
+  }
 
-    // Handle redirect response if any
-    await msalInstance.handleRedirectPromise();
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const code      = urlParams.get('code');
+    const authError = urlParams.get('error');
 
-    const accounts = msalInstance.getAllAccounts();
-    if (accounts.length > 0) {
-      // Already signed in from a previous session
+    if (authError) {
+      // Microsoft returned an error from the auth page
+      const desc = urlParams.get('error_description') || authError;
+      window.history.replaceState({}, document.title, window.location.pathname);
+      showLogin(`Sign-in error: ${desc}`);
+      return;
+    }
+
+    if (code) {
+      // Returning from Microsoft login — exchange code for token
+      if (statusEl) statusEl.textContent = 'Completing sign-in…';
+      await exchangeCode(code);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    const token = getStoredToken();
+    if (token) {
       document.getElementById('login-overlay').style.display = 'none';
       document.getElementById('btn-signout').style.display = 'inline-block';
       init();
     } else {
-      // Show login overlay
-      document.getElementById('login-overlay').style.display = 'flex';
+      showLogin('');
     }
   } catch (e) {
     console.error('[Battlecard] Bootstrap error:', e);
-    if (statusEl)  statusEl.textContent = `Startup error: ${e.message}`;
-    // Re-enable button so user can retry
-    if (signinBtn) { signinBtn.disabled = false; signinBtn.innerHTML = MS_ICON; }
+    showLogin(`Error: ${e.message}`);
   }
 })();
 </script>
