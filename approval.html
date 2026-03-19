@@ -312,8 +312,8 @@
 //  CONFIG — paste your Azure AD values here
 // ══════════════════════════════════════════════════════════════
 const OAUTH = {
-  clientId: '09548676-e97d-4d97-990f-64122e8a91c1',
-  tenantId: '60003fa7-209d-4a7d-8c8c-4c6d5eda32bb',
+  clientId: 'PASTE_CLIENT_ID_HERE',
+  tenantId: 'PASTE_TENANT_ID_HERE',
   scopes:   'https://cloudextend.sharepoint.com/AllSites.Read https://cloudextend.sharepoint.com/AllSites.Write openid profile',
   redirectUri: window.location.origin + window.location.pathname
 };
@@ -537,7 +537,7 @@ function fillForm(d) {
   // Accept both PascalCase (from Python/SharePoint) and camelCase (from JSON paste)
   set('f-competitor',      d.Title         || d.competitor);
   set('f-competitorId',    d.CompetitorID  || d.competitorId);
-  set('f-threatLevel',     d.ThreatLevel   || d.threatLevel);
+  set('f-threatLevel',     (d.ThreatLevel || d.threatLevel || '').toUpperCase());
   set('f-accentColor',     d.AccentColor   || d.accentColor);
   set('f-website',         d.Website       || d.website);
   set('f-tagline',         d.Tagline       || d.tagline);
