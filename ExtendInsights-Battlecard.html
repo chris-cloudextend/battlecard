@@ -772,7 +772,9 @@ async function init() {
 /* ── BOOTSTRAP ─────────────────────────────────────────────────────────────── */
 (async function bootstrap() {
   try {
-    await msalInstance.initialize();
+ await msalInstance.initialize();
+    const sb = document.getElementById('btn-signin');
+    if (sb) { sb.disabled = false; sb.style.opacity = '1'; }
     // Handle redirect response if any
     await msalInstance.handleRedirectPromise();
 
