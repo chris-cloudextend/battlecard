@@ -312,8 +312,8 @@
 //  CONFIG — paste your Azure AD values here
 // ══════════════════════════════════════════════════════════════
 const OAUTH = {
-  clientId: '09548676-e97d-4d97-990f-64122e8a91c1',
-  tenantId: '60003fa7-209d-4a7d-8c8c-4c6d5eda32bb',
+  clientId: 'PASTE_CLIENT_ID_HERE',
+  tenantId: 'PASTE_TENANT_ID_HERE',
   scopes:   'https://cloudextend.sharepoint.com/AllSites.Read https://cloudextend.sharepoint.com/AllSites.Write openid profile',
   redirectUri: window.location.origin + window.location.pathname
 };
@@ -349,9 +349,10 @@ function signIn() {
   generateVerifier().then(async verifier => {
     const challenge = await generateChallenge(verifier);
     sessionStorage.setItem('pkce_verifier', verifier);
-    // Preserve the hash data across the redirect
-    const hashData = window.location.hash;
-    if (hashData) sessionStorage.setItem('approval_hash', hashData);
+    // Save ?d= param so it survives the OAuth redirect
+    const urlParams = new URLSearchParams(window.location.search);
+    const d = urlParams.get('d');
+    if (d) sessionStorage.setItem('approval_data', d);
     const params = new URLSearchParams({
       client_id:             OAUTH.clientId,
       response_type:         'code',
@@ -412,22 +413,36 @@ function updateColorPreview() {
 // ══════════════════════════════════════════════════════════════
 //  JSON paste loader
 // ══════════════════════════════════════════════════════════════
+function tryLoadJson(raw) {
+  const errEl = document.getElementById('json-error');
+  errEl.style.display = 'none';
+  try {
+    const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+    if (!cleaned.startsWith('{')) return false; // not JSON yet
+    const data = JSON.parse(cleaned);
+    fillForm(data);
+    document.getElementById('json-paste-card').style.background = '#f0fdf4';
+    document.getElementById('json-load-btn').textContent = '✓ Loaded';
+    document.getElementById('json-load-btn').style.background = '#16a34a';
+    document.getElementById('page-title').textContent = `Review: ${data.competitor || 'New Competitor'}`;
+    document.getElementById('page-sub').textContent = `Source: ${data.source || 'unknown'} · Review all fields before approving.`;
+    return true;
+  } catch(e) {
+    return false;
+  }
+}
+
 function initJsonPaste() {
+  const input = document.getElementById('json-input');
+  const errEl = document.getElementById('json-error');
+  // Auto-load on paste
+  input.addEventListener('paste', (e) => {
+    setTimeout(() => tryLoadJson(input.value.trim()), 50);
+  });
+  // Manual load button
   document.getElementById('json-load-btn').addEventListener('click', () => {
-    const raw = document.getElementById('json-input').value.trim();
-    const errEl = document.getElementById('json-error');
     errEl.style.display = 'none';
-    try {
-      // Strip markdown code fences if present
-      const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
-      const data = JSON.parse(cleaned);
-      fillForm(data);
-      document.getElementById('json-paste-card').style.background = '#f0fdf4';
-      document.getElementById('json-load-btn').textContent = '✓ Loaded';
-      document.getElementById('json-load-btn').style.background = '#16a34a';
-      document.getElementById('page-title').textContent = `Review: ${data.competitor || 'New Competitor'}`;
-      document.getElementById('page-sub').textContent = `Source: ${data.source || 'unknown'} · Review all fields before approving.`;
-    } catch(e) {
+    if (!tryLoadJson(input.value.trim())) {
       errEl.textContent = 'Invalid JSON — make sure you copied the full block from Slack.';
       errEl.style.display = 'block';
     }
@@ -435,31 +450,26 @@ function initJsonPaste() {
 }
 
 // ══════════════════════════════════════════════════════════════
-//  Pre-fill form from URL hash  (#d=BASE64)
+//  Load data from URL param ?d= or sessionStorage
+//  (Slack preserves ?query params but strips #hash fragments)
 // ══════════════════════════════════════════════════════════════
-function loadFromHash() {
-  let hash = window.location.hash;
-  // If hash was saved before redirect, restore it
-  const saved = sessionStorage.getItem('approval_hash');
-  if (saved && !hash) { hash = saved; }
-  if (saved) { sessionStorage.removeItem('approval_hash'); }
-  if (!hash) {
-    document.getElementById('no-data-banner').style.display = 'block';
-    return;
-  }
+function loadData() {
+  // Check ?d= param first, then sessionStorage (survives OAuth redirect)
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get('d') || sessionStorage.getItem('approval_data');
+  if (raw) sessionStorage.removeItem('approval_data');
+  if (!raw) return; // no data — form stays empty, paste box is available
   try {
-    const raw = hash.replace(/^#d=/, '');
     const json = decodeURIComponent(atob(raw));
     const data = JSON.parse(json);
     fillForm(data);
+    document.getElementById('json-paste-card').style.display = 'none'; // hide paste box
     document.getElementById('page-title').textContent =
       `Review: ${data.competitor || 'New Competitor'}`;
     document.getElementById('page-sub').textContent =
       `Source: ${data.source || 'unknown'} · Review all fields before approving.`;
   } catch(e) {
-    document.getElementById('no-data-banner').style.display = 'block';
-    document.getElementById('no-data-banner').textContent =
-      '⚠️ Could not decode competitor data from link. Fill in the form manually.';
+    // silently fall through — paste box remains visible
   }
 }
 
@@ -677,13 +687,7 @@ function handleReject() {
   document.getElementById('reject-btn').addEventListener('click', handleReject);
   initJsonPaste();
 
-  // Restore hash after redirect and fill form
-  const savedHash = sessionStorage.getItem('approval_hash');
-  if (savedHash && !window.location.hash) {
-    history.replaceState({}, '', window.location.pathname + savedHash);
-    sessionStorage.removeItem('approval_hash');
-  }
-  loadFromHash();
+  loadData();
 })();
 </script>
 </body>
