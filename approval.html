@@ -31,6 +31,16 @@
     /* ── Alert banner ── */
     #no-data-banner { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 10px; padding: 14px 18px; margin-bottom: 20px; font-size: 14px; color: #92400e; display: none; }
 
+    /* ── JSON paste card ── */
+    #json-paste-card { background: white; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 20px; overflow: hidden; }
+    #json-paste-card .card-header { background: #eff6ff; border-bottom: 1px solid #bfdbfe; padding: 14px 20px; font-size: 13px; font-weight: 700; color: #1d4ed8; text-transform: uppercase; letter-spacing: 0.05em; }
+    #json-paste-body { padding: 16px 20px; display: flex; gap: 10px; align-items: flex-start; }
+    #json-input { flex: 1; border: 1px solid #d1d5db; border-radius: 6px; padding: 8px 10px; font-size: 12px; font-family: monospace; min-height: 60px; resize: vertical; color: #1e293b; }
+    #json-input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+    #json-load-btn { background: #3b82f6; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background 0.2s; }
+    #json-load-btn:hover { background: #2563eb; }
+    #json-error { color: #dc2626; font-size: 12px; margin-top: 6px; display: none; }
+
     /* ── Card ── */
     .card { background: white; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 20px; overflow: hidden; }
     .card-header { background: #f8fafc; border-bottom: 1px solid #e2e8f0; padding: 14px 20px; font-size: 13px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 8px; }
@@ -113,7 +123,20 @@
 <!-- ══════════════════════ MAIN ══════════════════════ -->
 <div class="container">
   <div id="status-banner"></div>
-  <div id="no-data-banner">⚠️ No competitor data found in the URL. You can fill in the form manually or paste the JSON from the Slack message.</div>
+
+  <!-- ── JSON Paste card ── -->
+  <div id="json-paste-card">
+    <div class="card-header">📋 Paste JSON from Slack to auto-fill the form</div>
+    <div id="json-paste-body">
+      <div style="flex:1">
+        <textarea id="json-input" placeholder='Paste the JSON block from the Slack message here, then click Load...'></textarea>
+        <div id="json-error"></div>
+      </div>
+      <button id="json-load-btn">Load →</button>
+    </div>
+  </div>
+
+  <div id="no-data-banner">⚠️ No competitor data found. Paste the JSON from the Slack message above, or fill in the form manually.</div>
 
   <div class="page-title" id="page-title">Review Competitor Update</div>
   <div class="page-sub" id="page-sub">Review the proposed data below, make any edits, then approve or reject.</div>
@@ -289,8 +312,8 @@
 //  CONFIG — paste your Azure AD values here
 // ══════════════════════════════════════════════════════════════
 const OAUTH = {
-  clientId: '09548676-e97d-4d97-990f-64122e8a91c1',
-  tenantId: '60003fa7-209d-4a7d-8c8c-4c6d5eda32bb',
+  clientId: 'PASTE_CLIENT_ID_HERE',
+  tenantId: 'PASTE_TENANT_ID_HERE',
   scopes:   'https://cloudextend.sharepoint.com/AllSites.Read https://cloudextend.sharepoint.com/AllSites.Write openid profile',
   redirectUri: window.location.origin + window.location.pathname
 };
@@ -384,6 +407,31 @@ function getToken() {
 function updateColorPreview() {
   const val = document.getElementById('f-accentColor').value;
   document.getElementById('color-preview').style.background = val || '#e2e8f0';
+}
+
+// ══════════════════════════════════════════════════════════════
+//  JSON paste loader
+// ══════════════════════════════════════════════════════════════
+function initJsonPaste() {
+  document.getElementById('json-load-btn').addEventListener('click', () => {
+    const raw = document.getElementById('json-input').value.trim();
+    const errEl = document.getElementById('json-error');
+    errEl.style.display = 'none';
+    try {
+      // Strip markdown code fences if present
+      const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+      const data = JSON.parse(cleaned);
+      fillForm(data);
+      document.getElementById('json-paste-card').style.background = '#f0fdf4';
+      document.getElementById('json-load-btn').textContent = '✓ Loaded';
+      document.getElementById('json-load-btn').style.background = '#16a34a';
+      document.getElementById('page-title').textContent = `Review: ${data.competitor || 'New Competitor'}`;
+      document.getElementById('page-sub').textContent = `Source: ${data.source || 'unknown'} · Review all fields before approving.`;
+    } catch(e) {
+      errEl.textContent = 'Invalid JSON — make sure you copied the full block from Slack.';
+      errEl.style.display = 'block';
+    }
+  });
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -627,6 +675,7 @@ function handleReject() {
   // Wire buttons
   document.getElementById('approve-btn').addEventListener('click', handleApprove);
   document.getElementById('reject-btn').addEventListener('click', handleReject);
+  initJsonPaste();
 
   // Restore hash after redirect and fill form
   const savedHash = sessionStorage.getItem('approval_hash');
