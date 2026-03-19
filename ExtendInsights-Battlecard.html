@@ -194,14 +194,8 @@
     <div class="login-logo">📊</div>
     <h2>ExtendInsights Battlecard</h2>
     <p class="sub">Sign in with your Celigo Microsoft account to access live competitive intelligence data.</p>
-    <button class="btn-ms" id="btn-signin" onclick="signIn()">
-      <svg width="20" height="20" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
-        <rect x="1" y="1" width="9" height="9" fill="#f25022"/>
-        <rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
-        <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/>
-        <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
-      </svg>
-      Sign in with Microsoft
+    <button class="btn-ms" id="btn-signin" onclick="signIn()" disabled style="opacity:0.6">
+      Initializing…
     </button>
     <p class="login-status" id="login-status"></p>
     <p class="login-note">For internal sales &amp; marketing use only · Celigo CloudExtend</p>
@@ -378,8 +372,8 @@
    See GitHub-Setup-Guide.md → Step 2 for exact instructions.
    ─────────────────────────────────────────────────────────────────────────── */
 const AUTH_CONFIG = {
-  clientId:  '09548676-e97d-4d97-990f-64122e8a91c1',   // Application (client) ID from Azure AD
-  tenantId:  '60003fa7-209d-4a7d-8c8c-4c6d5eda32bb',   // Directory (tenant) ID from Azure AD
+  clientId:  'PASTE_CLIENT_ID_HERE',   // Application (client) ID from Azure AD
+  tenantId:  'PASTE_TENANT_ID_HERE',   // Directory (tenant) ID from Azure AD
   // Redirect URI — update this to match your GitHub Pages URL exactly
   // e.g. 'https://celigo.github.io/battlecard/'  (must match Azure AD registration)
   redirectUri: window.location.origin + window.location.pathname,
@@ -424,20 +418,17 @@ const MATRIX_ROWS = [
 ];
 
 /* ── MSAL INSTANCE ────────────────────────────────────────────────────────── */
-const msalInstance = new msal.PublicClientApplication({
-  auth: {
-    clientId:    AUTH_CONFIG.clientId,
-    authority:   `https://login.microsoftonline.com/${AUTH_CONFIG.tenantId}`,
-    redirectUri: AUTH_CONFIG.redirectUri,
-  },
-  cache: {
-    cacheLocation: 'sessionStorage',
-    storeAuthStateInCookie: false,
-  },
-});
+// Declared here, created inside bootstrap() so any constructor errors are caught
+let msalInstance = null;
+
+const MS_ICON = `<svg width="20" height="20" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg> Sign in with Microsoft`;
 
 /* ── AUTH ACTIONS ─────────────────────────────────────────────────────────── */
 async function signIn() {
+  if (!msalInstance) {
+    document.getElementById('login-status').textContent = 'Still starting up — please wait a moment and try again.';
+    return;
+  }
   const btn = document.getElementById('btn-signin');
   const status = document.getElementById('login-status');
   btn.disabled = true;
@@ -450,7 +441,7 @@ async function signIn() {
     init();
   } catch (e) {
     btn.disabled = false;
-    btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg> Sign in with Microsoft`;
+    btn.innerHTML = MS_ICON;
     if (e.errorCode === 'popup_window_error') {
       status.textContent = '⚠️ Popup blocked — please allow popups for this site and try again.';
     } else if (e.errorCode === 'user_cancelled') {
@@ -462,6 +453,7 @@ async function signIn() {
 }
 
 function signOut() {
+  if (!msalInstance) return;
   const accounts = msalInstance.getAllAccounts();
   if (accounts.length > 0) {
     msalInstance.logoutPopup({ account: accounts[0] }).then(() => {
@@ -471,6 +463,7 @@ function signOut() {
 }
 
 async function acquireToken() {
+  if (!msalInstance) throw new Error('MSAL not initialized');
   const accounts = msalInstance.getAllAccounts();
   if (!accounts.length) throw new Error('NOT_SIGNED_IN');
   try {
@@ -771,10 +764,27 @@ async function init() {
 
 /* ── BOOTSTRAP ─────────────────────────────────────────────────────────────── */
 (async function bootstrap() {
+  const statusEl  = document.getElementById('login-status');
+  const signinBtn = document.getElementById('btn-signin');
   try {
- await msalInstance.initialize();
-    const sb = document.getElementById('btn-signin');
-    if (sb) { sb.disabled = false; sb.style.opacity = '1'; }
+    // Create MSAL inside bootstrap so any constructor errors are safely caught
+    msalInstance = new msal.PublicClientApplication({
+      auth: {
+        clientId:    AUTH_CONFIG.clientId,
+        authority:   `https://login.microsoftonline.com/${AUTH_CONFIG.tenantId}`,
+        redirectUri: AUTH_CONFIG.redirectUri,
+      },
+      cache: {
+        cacheLocation: 'sessionStorage',
+        storeAuthStateInCookie: false,
+      },
+    });
+
+    await msalInstance.initialize();
+
+    // MSAL is ready — enable the sign-in button
+    if (signinBtn) { signinBtn.disabled = false; signinBtn.innerHTML = MS_ICON; }
+
     // Handle redirect response if any
     await msalInstance.handleRedirectPromise();
 
@@ -790,7 +800,9 @@ async function init() {
     }
   } catch (e) {
     console.error('[Battlecard] Bootstrap error:', e);
-    document.getElementById('login-status').textContent = `Startup error: ${e.message}`;
+    if (statusEl)  statusEl.textContent = `Startup error: ${e.message}`;
+    // Re-enable button so user can retry
+    if (signinBtn) { signinBtn.disabled = false; signinBtn.innerHTML = MS_ICON; }
   }
 })();
 </script>
