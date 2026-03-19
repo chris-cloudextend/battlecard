@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ExtendInsights — Competitive Battlecard</title>
+<!-- Microsoft Authentication Library (MSAL.js) -->
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<style>
+  /* ─── DESIGN TOKENS ─────────────────────────────────────────────────────── */
+  :root {
+    --brand: #1E4B8F; --brand-light: #2E6BC9; --brand-pale: #EBF2FF;
+    --accent: #F0A500; --accent-pale: #FFF8E7;
+    --green: #1A8754; --green-pale: #D1FAE5;
+    --red: #C0392B;   --red-pale: #FEE2E0;
+    --yellow: #B45309; --yellow-pale: #FEF3C7;
+    --gray-50:#F8FAFC; --gray-100:#F1F5F9; --gray-200:#E2E8F0;
+    --gray-300:#CBD5E1; --gray-500:#64748B; --gray-700:#334155; --gray-900:#0F172A;
+    --radius:10px;
+    --shadow:0 1px 3px rgba(0,0,0,.1),0 4px 12px rgba(0,0,0,.06);
+    --shadow-lg:0 8px 30px rgba(0,0,0,.12);
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; background:var(--gray-100); color:var(--gray-900); line-height:1.5; }
+
+  /* ─── LOGIN OVERLAY ─────────────────────────────────────────────────────── */
+  #login-overlay {
+    position:fixed; inset:0;
+    background:linear-gradient(135deg,#1E4B8F 0%,#2E6BC9 100%);
+    display:flex; align-items:center; justify-content:center;
+    z-index:1000;
+  }
+  .login-card {
+    background:#fff; border-radius:18px; padding:48px 44px;
+    text-align:center; max-width:420px; width:90%;
+    box-shadow:0 24px 64px rgba(0,0,0,.35);
+  }
+  .login-logo { font-size:52px; margin-bottom:20px; }
+  .login-card h2 { font-size:22px; font-weight:800; color:var(--gray-900); margin-bottom:10px; }
+  .login-card .sub { font-size:14px; color:var(--gray-500); margin-bottom:32px; line-height:1.6; }
+  .btn-ms {
+    background:#0078d4; color:#fff; border:none;
+    padding:14px 28px; border-radius:8px; font-size:15px; font-weight:600;
+    cursor:pointer; display:inline-flex; align-items:center; gap:10px;
+    transition:background .2s; box-shadow:0 2px 8px rgba(0,120,212,.3);
+  }
+  .btn-ms:hover { background:#006cc1; }
+  .btn-ms:disabled { background:#93b8d9; cursor:not-allowed; }
+  .login-status { font-size:13px; color:var(--gray-500); margin-top:18px; min-height:20px; }
+  .login-note { font-size:11px; color:var(--gray-300); margin-top:24px; }
+
+  /* ─── HEADER ────────────────────────────────────────────────────────────── */
+  .page-header { background:linear-gradient(135deg,var(--brand) 0%,var(--brand-light) 100%); color:#fff; padding:28px 40px 24px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; }
+  .page-header h1 { font-size:22px; font-weight:700; letter-spacing:-.3px; }
+  .page-header p  { font-size:13px; opacity:.8; margin-top:3px; }
+  .header-right { display:flex; align-items:center; gap:12px; }
+  .badge-updated  { background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.3); border-radius:20px; padding:4px 12px; font-size:12px; font-weight:600; white-space:nowrap; }
+  .btn-signout { background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.3); color:#fff; border-radius:20px; padding:4px 12px; font-size:11px; font-weight:600; cursor:pointer; white-space:nowrap; }
+  .btn-signout:hover { background:rgba(255,255,255,.25); }
+
+  /* ─── TABS ──────────────────────────────────────────────────────────────── */
+  .tabs-bar { background:#fff; border-bottom:1px solid var(--gray-200); padding:0 40px; display:flex; gap:0; overflow-x:auto; }
+  .tab-btn  { padding:14px 20px; font-size:13px; font-weight:600; color:var(--gray-500); cursor:pointer; border:none; background:none; border-bottom:3px solid transparent; white-space:nowrap; transition:color .2s,border-color .2s; }
+  .tab-btn:hover  { color:var(--brand); }
+  .tab-btn.active { color:var(--brand); border-bottom-color:var(--brand); }
+
+  /* ─── MAIN ──────────────────────────────────────────────────────────────── */
+  .main { max-width:1200px; margin:0 auto; padding:32px 24px; }
+  .tab-panel { display:none; }
+  .tab-panel.active { display:block; }
+
+  /* ─── OVERVIEW ──────────────────────────────────────────────────────────── */
+  .overview-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px; margin-bottom:28px; }
+  .stat-card { background:#fff; border-radius:var(--radius); padding:20px 22px; box-shadow:var(--shadow); border-left:4px solid var(--brand); }
+  .stat-card .label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.8px; color:var(--gray-500); margin-bottom:6px; }
+  .stat-card .value { font-size:22px; font-weight:800; color:var(--brand); }
+  .stat-card .sub   { font-size:12px; color:var(--gray-500); margin-top:3px; }
+
+  /* ─── SECTION HEADERS ────────────────────────────────────────────────────── */
+  .section-title { font-size:15px; font-weight:700; color:var(--gray-700); margin-bottom:14px; display:flex; align-items:center; gap:8px; }
+  .section-title .dot { width:8px; height:8px; border-radius:50%; background:var(--brand); flex-shrink:0; }
+
+  /* ─── COMPETITOR CARDS ───────────────────────────────────────────────────── */
+  .comp-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); gap:16px; margin-bottom:32px; }
+  .comp-card { background:#fff; border-radius:var(--radius); box-shadow:var(--shadow); border-top:4px solid var(--gray-300); overflow:hidden; cursor:pointer; transition:transform .15s,box-shadow .15s; }
+  .comp-card:hover { transform:translateY(-2px); box-shadow:var(--shadow-lg); }
+  .comp-header { padding:18px 20px 14px; display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+  .comp-name    { font-size:16px; font-weight:700; color:var(--gray-900); }
+  .comp-tagline { font-size:12px; color:var(--gray-500); margin-top:2px; }
+  .threat-badge { font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; white-space:nowrap; flex-shrink:0; margin-top:2px; }
+  .threat-high   { background:var(--red-pale);    color:var(--red); }
+  .threat-medium { background:var(--yellow-pale); color:var(--yellow); }
+  .threat-low    { background:var(--green-pale);  color:var(--green); }
+  .comp-body { padding:0 20px 18px; border-top:1px solid var(--gray-100); }
+  .comp-section { margin-top:14px; }
+  .comp-section-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.7px; color:var(--gray-500); margin-bottom:7px; }
+  .tag-row { display:flex; flex-wrap:wrap; gap:5px; }
+  .tag { font-size:11px; font-weight:600; padding:3px 8px; border-radius:4px; background:var(--gray-100); color:var(--gray-700); }
+  .tag.green { background:var(--green-pale); color:var(--green); }
+  .tag.red   { background:var(--red-pale);   color:var(--red); }
+  .tag.blue  { background:var(--brand-pale); color:var(--brand); }
+  .bullet-list { list-style:none; padding:0; }
+  .bullet-list li { font-size:12.5px; color:var(--gray-700); padding:2px 0 2px 14px; position:relative; }
+  .bullet-list li::before { content:"•"; position:absolute; left:2px; color:var(--gray-400); }
+  .bullet-list.pros li::before { color:var(--green); }
+  .bullet-list.cons li::before { color:var(--red); }
+
+  /* ─── MESSAGING MATRIX ────────────────────────────────────────────────────── */
+  .matrix-wrap { background:#fff; border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden; margin-bottom:28px; }
+  .matrix-table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .matrix-table th { background:var(--brand); color:#fff; padding:11px 14px; text-align:left; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.7px; white-space:nowrap; }
+  .matrix-table th.ours { background:var(--accent); color:#fff; }
+  .matrix-table td { padding:10px 14px; border-bottom:1px solid var(--gray-100); vertical-align:top; color:var(--gray-700); }
+  .matrix-table tr:last-child td { border-bottom:none; }
+  .matrix-table td:first-child { font-weight:700; color:var(--gray-900); background:var(--gray-50); font-size:11px; text-transform:uppercase; letter-spacing:.5px; }
+  .matrix-table td.ours { background:var(--accent-pale); font-weight:600; color:var(--gray-900); }
+  .matrix-table tr:hover td { background:var(--gray-50); }
+  .matrix-table tr:hover td.ours { background:var(--accent-pale); }
+  .matrix-table tr:hover td:first-child { background:var(--gray-100); }
+
+  /* ─── CONTENT GAPS ────────────────────────────────────────────────────────── */
+  .gap-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; margin-bottom:28px; }
+  .gap-card { background:#fff; border-radius:var(--radius); box-shadow:var(--shadow); padding:20px; }
+  .gap-card h4 { font-size:14px; font-weight:700; color:var(--gray-900); margin-bottom:6px; display:flex; align-items:center; gap:8px; }
+  .gap-card h4 .icon { font-size:16px; }
+  .gap-card p { font-size:12.5px; color:var(--gray-500); margin-bottom:12px; line-height:1.55; }
+  .gap-card .action { font-size:12px; font-weight:700; color:var(--brand); padding:8px 12px; background:var(--brand-pale); border-radius:6px; display:block; }
+
+  /* ─── OBJECTION HANDLING ─────────────────────────────────────────────────── */
+  .objection-table { background:#fff; border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden; margin-bottom:28px; }
+  .objection-table table { width:100%; border-collapse:collapse; font-size:13px; }
+  .objection-table th { background:var(--gray-700); color:#fff; padding:12px 18px; text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.7px; font-weight:700; }
+  .objection-table td { padding:13px 18px; border-bottom:1px solid var(--gray-100); vertical-align:top; }
+  .objection-table tr:last-child td { border-bottom:none; }
+  .objection-table td:first-child { font-style:italic; color:var(--gray-500); width:38%; }
+  .objection-table td:last-child  { color:var(--gray-700); font-weight:500; }
+
+  /* ─── POSITIONING MAP ─────────────────────────────────────────────────────── */
+  .pos-map-wrap { background:#fff; border-radius:var(--radius); box-shadow:var(--shadow); padding:28px; margin-bottom:28px; }
+  .pos-map { position:relative; width:100%; max-width:600px; margin:0 auto; }
+  .pos-map-chart { position:relative; width:100%; padding-top:70%; border:2px solid var(--gray-200); border-radius:6px; background:linear-gradient(135deg,var(--gray-50) 0%,#fff 100%); }
+  .axis-label { position:absolute; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.7px; color:var(--gray-500); }
+  .axis-x-left  { bottom:-22px; left:4px; }
+  .axis-x-right { bottom:-22px; right:4px; }
+  .axis-y-top    { top:4px; left:50%; transform:translateX(-50%); }
+  .axis-line-x { position:absolute; left:4%; right:4%; top:50%; height:1px; background:var(--gray-200); }
+  .axis-line-y { position:absolute; top:4%; bottom:4%; left:50%; width:1px; background:var(--gray-200); }
+  .pos-dot { position:absolute; transform:translate(-50%,-50%); width:14px; height:14px; border-radius:50%; border:3px solid #fff; box-shadow:0 2px 6px rgba(0,0,0,.25); cursor:pointer; transition:transform .2s; }
+  .pos-dot:hover { transform:translate(-50%,-50%) scale(1.4); }
+  .pos-dot-label { position:absolute; font-size:11px; font-weight:700; white-space:nowrap; background:rgba(255,255,255,.9); padding:2px 6px; border-radius:4px; box-shadow:0 1px 4px rgba(0,0,0,.12); pointer-events:none; }
+  .pos-dot.ours { background:var(--accent); width:18px; height:18px; border:3px solid #fff; z-index:10; }
+  .map-legend { display:flex; flex-wrap:wrap; gap:12px; margin-top:36px; justify-content:center; }
+  .legend-item { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; }
+  .legend-dot { width:12px; height:12px; border-radius:50%; }
+
+  /* ─── DIFFERENTIATORS ─────────────────────────────────────────────────────── */
+  .diff-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px; margin-bottom:28px; }
+  .diff-card { background:#fff; border-radius:var(--radius); box-shadow:var(--shadow); padding:18px 20px; border-left:4px solid var(--accent); }
+  .diff-card .num { font-size:24px; font-weight:900; color:var(--accent); line-height:1; }
+  .diff-card h4 { font-size:13px; font-weight:700; color:var(--gray-900); margin-top:4px; margin-bottom:5px; }
+  .diff-card p  { font-size:12px; color:var(--gray-500); line-height:1.55; }
+
+  /* ─── LANDMINES ───────────────────────────────────────────────────────────── */
+  .landmine-box { background:#fff; border-radius:var(--radius); box-shadow:var(--shadow); padding:22px 24px; margin-bottom:28px; }
+  .landmine-box h3 { font-size:13px; font-weight:700; margin-bottom:14px; color:var(--gray-900); display:flex; align-items:center; gap:6px; }
+  .landmine-list { list-style:none; }
+  .landmine-list li { font-size:13px; color:var(--gray-700); padding:9px 0; border-bottom:1px solid var(--gray-100); display:flex; gap:10px; align-items:flex-start; }
+  .landmine-list li:last-child { border-bottom:none; }
+  .mine-icon { font-size:14px; flex-shrink:0; margin-top:1px; }
+
+  /* ─── LOADING / ERROR ─────────────────────────────────────────────────────── */
+  .sp-loading { text-align:center; padding:60px 20px; color:var(--gray-500); font-size:14px; }
+  .sp-loading .spinner { display:inline-block; width:28px; height:28px; border:3px solid var(--gray-200); border-top-color:var(--brand); border-radius:50%; animation:spin .8s linear infinite; margin-bottom:14px; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .sp-error { background:var(--red-pale); border-left:4px solid var(--red); border-radius:8px; padding:18px 22px; margin-bottom:24px; }
+  .sp-error h4 { font-size:14px; font-weight:700; color:var(--red); margin-bottom:6px; }
+  .sp-error p  { font-size:13px; color:#7F1D1D; line-height:1.6; }
+  .sp-error code { background:rgba(0,0,0,.06); padding:2px 6px; border-radius:4px; font-family:monospace; font-size:12px; }
+
+  /* ─── FOOTER / RESPONSIVE ─────────────────────────────────────────────────── */
+  .page-footer { text-align:center; padding:24px; font-size:11px; color:var(--gray-500); border-top:1px solid var(--gray-200); margin-top:16px; }
+  @media (max-width:640px) {
+    .page-header, .tabs-bar { padding-left:16px; padding-right:16px; }
+    .main { padding:20px 12px; }
+    .matrix-wrap { overflow-x:auto; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ─── LOGIN OVERLAY ───────────────────────────────────────────────────────── -->
+<div id="login-overlay">
+  <div class="login-card">
+    <div class="login-logo">📊</div>
+    <h2>ExtendInsights Battlecard</h2>
+    <p class="sub">Sign in with your Celigo Microsoft account to access live competitive intelligence data.</p>
+    <button class="btn-ms" id="btn-signin" onclick="signIn()">
+      <svg width="20" height="20" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
+        <rect x="1" y="1" width="9" height="9" fill="#f25022"/>
+        <rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
+        <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/>
+        <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
+      </svg>
+      Sign in with Microsoft
+    </button>
+    <p class="login-status" id="login-status"></p>
+    <p class="login-note">For internal sales &amp; marketing use only · Celigo CloudExtend</p>
+  </div>
+</div>
+
+<!-- ─── HEADER ─────────────────────────────────────────────────────────────── -->
+<div class="page-header">
+  <div>
+    <h1>ExtendInsights — Competitive Intelligence Battlecard</h1>
+    <p id="hdr-subtitle">Loading competitor data from SharePoint…</p>
+  </div>
+  <div class="header-right">
+    <span class="badge-updated" id="hdr-updated">Loading…</span>
+    <button class="btn-signout" onclick="signOut()" id="btn-signout" style="display:none">Sign out</button>
+  </div>
+</div>
+
+<!-- ─── TABS ───────────────────────────────────────────────────────────────── -->
+<div class="tabs-bar">
+  <button class="tab-btn active" onclick="showTab('overview',this)">Overview</button>
+  <button class="tab-btn" onclick="showTab('competitors',this)">Competitor Cards</button>
+  <button class="tab-btn" onclick="showTab('messaging',this)">Messaging Matrix</button>
+  <button class="tab-btn" onclick="showTab('positioning',this)">Positioning Map</button>
+  <button class="tab-btn" onclick="showTab('gaps',this)">Content Gaps</button>
+  <button class="tab-btn" onclick="showTab('objections',this)">Objection Handling</button>
+  <button class="tab-btn" onclick="showTab('landmines',this)">Landmines</button>
+</div>
+
+<div class="main">
+
+<!-- ─── OVERVIEW ───────────────────────────────────────────────────────────── -->
+<div id="tab-overview" class="tab-panel active">
+
+  <div id="overview-stats" class="overview-grid">
+    <div class="sp-loading"><div class="spinner"></div><br>Loading…</div>
+  </div>
+
+  <div class="section-title"><span class="dot"></span>Our Core Differentiators</div>
+  <div class="diff-grid">
+    <div class="diff-card"><div class="num">01</div><h4>True Multi-Source Reporting</h4><p>Combine NetSuite, Salesforce, HubSpot, Stripe, and Chargebee in a single Excel report. No competitor covers all five systems.</p></div>
+    <div class="diff-card"><div class="num">02</div><h4>Two-Way Write-Back to NetSuite</h4><p>Bulk update up to 10,000 lines back to NetSuite directly from Excel — without CSVs. Solution 7 has drill-back; none offer true bulk write-back.</p></div>
+    <div class="diff-card"><div class="num">03</div><h4>AI-Powered, One-Step Downloads</h4><p>AI assists with data queries and transformations natively in Excel — not a standalone AI tool you have to switch to.</p></div>
+    <div class="diff-card"><div class="num">04</div><h4>Works in Excel (Not a Replacement)</h4><p>Users stay in the Excel they already know. Equals forces a tool switch; Supermetrics and Coefficient treat Excel as just one of many destinations.</p></div>
+    <div class="diff-card"><div class="num">05</div><h4>Backed by Celigo Integration Expertise</h4><p>Part of Celigo's CloudExtend platform — enterprise-grade integration know-how baked into the product, not a startup pivot.</p></div>
+    <div class="diff-card"><div class="num">06</div><h4>Excel &amp; Power BI Support</h4><p>Build in Excel or publish to Power BI dashboards. Competitors focus on one or the other — not both.</p></div>
+  </div>
+
+</div>
+
+<!-- ─── COMPETITORS ─────────────────────────────────────────────────────────── -->
+<div id="tab-competitors" class="tab-panel">
+  <div id="comp-cards-container">
+    <div class="sp-loading"><div class="spinner"></div><br>Loading competitor data…</div>
+  </div>
+</div>
+
+<!-- ─── MESSAGING MATRIX ────────────────────────────────────────────────────── -->
+<div id="tab-messaging" class="tab-panel">
+  <div class="section-title"><span class="dot"></span>Messaging &amp; Positioning Comparison</div>
+  <div id="matrix-container">
+    <div class="sp-loading"><div class="spinner"></div><br>Loading matrix…</div>
+  </div>
+</div>
+
+<!-- ─── POSITIONING MAP ─────────────────────────────────────────────────────── -->
+<div id="tab-positioning" class="tab-panel">
+  <div class="section-title"><span class="dot"></span>Competitive Positioning Map</div>
+  <div class="pos-map-wrap">
+    <p style="font-size:13px;color:var(--gray-500);margin-bottom:24px;">Axes: <strong>Y-axis</strong> = NetSuite depth (High → Low) · <strong>X-axis</strong> = Audience breadth (Finance-only → Cross-functional/Marketing)</p>
+    <div class="pos-map">
+      <div class="pos-map-chart" id="mapChart">
+        <div class="axis-line-x"></div>
+        <div class="axis-line-y"></div>
+        <div class="pos-dot ours" style="left:60%;top:18%;" title="ExtendInsights"></div>
+        <div class="pos-dot-label" style="left:64%;top:10%;position:absolute;font-size:11px;font-weight:800;color:var(--accent);background:rgba(255,255,255,.95);padding:2px 7px;border-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,.15);">⭐ ExtendInsights</div>
+        <div id="map-dots"></div>
+        <span class="axis-label axis-y-top">▲ Deep NetSuite</span>
+        <span class="axis-label axis-x-left">Finance-only ◀</span>
+        <span class="axis-label axis-x-right">▶ Cross-functional / Marketing</span>
+        <span class="axis-label" style="bottom:-24px;left:50%;transform:translateX(-50%);">▼ No ERP / SaaS focus</span>
+      </div>
+      <div class="map-legend" id="map-legend">
+        <div class="legend-item"><div class="legend-dot" style="background:var(--accent);border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.2);"></div>ExtendInsights</div>
+      </div>
+    </div>
+    <div id="map-insight" style="background:var(--brand-pale);border-radius:8px;padding:16px 20px;margin-top:28px;border-left:4px solid var(--brand);">
+      <div style="font-size:13px;font-weight:700;color:var(--brand);margin-bottom:6px;">📍 Key Insight</div>
+      <p style="font-size:13px;color:var(--gray-700);line-height:1.6;">ExtendInsights occupies the <strong>uncontested sweet spot</strong>: deep NetSuite integration combined with cross-functional, multi-source reporting. Solution 7 is the only direct NetSuite competitor, but it is locked in finance. No competitor offers <em>both</em> NetSuite depth AND multi-source breadth for business analysts.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ─── CONTENT GAPS ─────────────────────────────────────────────────────────── -->
+<div id="tab-gaps" class="tab-panel">
+  <div class="section-title"><span class="dot"></span>Content Gaps &amp; Opportunities to Exploit</div>
+  <div class="gap-grid">
+    <div class="gap-card"><h4><span class="icon">🎯</span>Cross-Functional Reporting Hub</h4><p>No competitor covers combining ERP + CRM + billing + marketing data in a single Excel report. This is unowned territory.</p><span class="action">Create: "How to build a cross-functional ops dashboard in Excel connecting NetSuite, Salesforce, and Stripe"</span></div>
+    <div class="gap-card"><h4><span class="icon">💰</span>Steal Supermetrics' Unhappy Customers</h4><p>1/3 of Supermetrics' recent G2 reviews cite pricing as their top complaint. They're marketing-only and don't touch ERP data.</p><span class="action">Create: Comparison content targeting "Supermetrics alternatives" + "Excel marketing + ERP reporting" keyword clusters</span></div>
+    <div class="gap-card"><h4><span class="icon">🏦</span>Finance Teams Who Need More Than Finance</h4><p>Solution 7 locks finance teams into NetSuite-only reporting. CFOs increasingly need Stripe, HubSpot, and Salesforce data alongside GL data.</p><span class="action">Create: "Beyond NetSuite: How finance teams are combining ERP + SaaS billing + CRM data in Excel"</span></div>
+    <div class="gap-card"><h4><span class="icon">🧑‍💻</span>Equals Audience Who Wants to Stay in Excel</h4><p>Equals targets the same analytics buyer but forces a full tool switch. Many teams won't or can't abandon Excel templates, formulas, and macros.</p><span class="action">Create: "Why we chose Excel over next-gen spreadsheet tools for our analytics stack" — SEO + thought leadership</span></div>
+    <div class="gap-card"><h4><span class="icon">⚡</span>NetSuite Write-Back Use Cases (Unowned)</h4><p>No competitor creates content around writing data BACK to NetSuite from Excel at scale. Unique capability with zero competitive content coverage.</p><span class="action">Create: "How to bulk update NetSuite inventory/records from Excel without CSVs" — high-intent, low-competition keyword</span></div>
+    <div class="gap-card"><h4><span class="icon">📊</span>Power BI + Excel Hybrid Workflows</h4><p>No competitor covers the workflow of building in Excel and publishing to Power BI — the growing analyst population that uses both tools.</p><span class="action">Create: "Excel to Power BI: The analyst's guide to live NetSuite dashboards without duplicating work"</span></div>
+    <div class="gap-card"><h4><span class="icon">🤖</span>AI + ERP Data (Emerging)</h4><p>Competitors are adding generic AI assistants. Gap in content about AI-powered ERP data analysis specifically — not just formula help.</p><span class="action">Create: "How AI changes NetSuite reporting: from saved searches to natural language queries in Excel"</span></div>
+    <div class="gap-card"><h4><span class="icon">🆚</span>NetSuite ODBC Cost Comparison</h4><p>Coefficient has created content comparing NetSuite ODBC costs ($3–5k/yr). ExtendInsights should own this conversation with depth and ROI calculators.</p><span class="action">Create: "Total cost of NetSuite reporting: ODBC vs. connectors vs. native" — ROI-focused with interactive calculator</span></div>
+  </div>
+</div>
+
+<!-- ─── OBJECTION HANDLING ───────────────────────────────────────────────────── -->
+<div id="tab-objections" class="tab-panel">
+  <div class="section-title"><span class="dot"></span>Objection Handling by Competitor</div>
+  <div class="objection-table">
+    <table>
+      <thead><tr><th>If the prospect says…</th><th>Respond with…</th></tr></thead>
+      <tbody>
+        <tr><td>"We're already using Coefficient — it connects to NetSuite."</td><td>Coefficient connects to NetSuite for reading data, but their NetSuite integration is read-only — you cannot push anything back to NetSuite. Write-back in Coefficient only works for Salesforce and HubSpot. ExtendInsights gives you bulk write-back to NetSuite of up to 10,000 lines per transaction, plus AI-powered saved search queries and support from Celigo's dedicated NetSuite team. Ask: "Do you need to update records in NetSuite from your model, or just pull data out?" That question usually closes the conversation.</td></tr>
+        <tr><td>"Solution 7 does everything we need for NetSuite in Excel."</td><td>Solution 7 is excellent for financial reporting, and if your team is purely finance, it's a solid tool. But if you also want sales, CRM, or billing data in the same report — Salesforce deals alongside your NetSuite GL — that requires ExtendInsights. Ask: "Is your NetSuite reporting only consumed by the finance team, or do ops and sales teams need visibility too?"</td></tr>
+        <tr><td>"We looked at Equals — it's more modern than Excel."</td><td>Equals is built for SaaS startups reporting on metrics like MRR and churn. It replaces Excel entirely, which means rebuilding every template, formula, and macro your team depends on. If you're on NetSuite, Equals doesn't connect to ERP data at all. The question is whether you want to own your analysis in the tools your team already knows, or migrate and rebuild from scratch.</td></tr>
+        <tr><td>"Supermetrics pulls our marketing data into Excel — can't we just use that?"</td><td>Supermetrics is excellent for Google Ads, Meta, and GA4 data. But it doesn't touch NetSuite, Salesforce, or your billing systems. You'd end up with marketing data in one Excel model and ERP/CRM data in another — with no way to combine them. ExtendInsights lets you build a single report that brings all of those together. Also worth noting: Supermetrics' per-source pricing tends to escalate quickly.</td></tr>
+        <tr><td>"Coefficient is cheaper."</td><td>Coefficient's headline pricing ($49–$99/user/mo) looks lower, but NetSuite is a premium add-on with pricing that isn't published — it's not included in any standard tier. Once you add that, plus the fact that their NetSuite connector is read-only so you'll need another solution for write-back, the true cost comparison shifts significantly. Ask: "Have you gotten a quote from Coefficient that specifically includes the NetSuite connector?" That question usually reveals the gap between list price and what they'll actually pay.</td></tr>
+        <tr><td>"We already have NetSuite saved searches — why do we need this?"</td><td>Saved searches are powerful inside NetSuite, but they don't travel well — you can't cross them with Salesforce opportunity data, apply Excel formulas and pivot tables, schedule them to run overnight, or push updated records back. ExtendInsights wraps your existing saved searches in all of those capabilities without requiring you to learn a new tool.</td></tr>
+        <tr><td>"We found a free tool that pulls NetSuite into Excel with no add-in — just paste a URL into Power Query."</td><td>That tool uses a webhook token URL as a permanent, shareable credential for your live NetSuite data. "Cryptographically signed" sounds reassuring, but it means the URL can't be <em>forged</em> — it doesn't mean it can't be forwarded, appear in browser history, end up in a shared spreadsheet, or leak in a git repo. Anyone with that URL has live access to your NetSuite data with no further authentication. Ask your IT or security team how they classify live business data accessible via a URL that can be emailed to anyone. Beyond the security issue: the tool has no company behind it, no SOC 2, no support contact, no scheduling (listed as "coming soon" even on the paid tier), and is limited to 100 rows on free. It also makes several misleading comparisons about other tools on their website.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ─── LANDMINES ────────────────────────────────────────────────────────────── -->
+<div id="tab-landmines" class="tab-panel">
+  <div class="section-title"><span class="dot"></span>Landmines to Set &amp; Defuse</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px;">
+    <div class="landmine-box">
+      <h3>💣 Landmines to SET (Questions That Expose Competitor Weaknesses)</h3>
+      <ul class="landmine-list">
+        <li><span class="mine-icon">🎯</span><div><strong>For Coefficient prospects:</strong> "Do you need to push data back into NetSuite from Excel — like updated forecasts, inventory counts, or journal entries?" — Coefficient's NetSuite connector is read-only; this question immediately surfaces our unique write-back advantage.</div></li>
+        <li><span class="mine-icon">🎯</span><div><strong>For Solution 7 prospects:</strong> "Does your reporting need to stay within the finance team, or do ops and revenue teams need the same data?" — surfaces multi-source need.</div></li>
+        <li><span class="mine-icon">🎯</span><div><strong>For Equals prospects:</strong> "How many custom Excel formulas, macros, or templates does your team rely on today?" — surfaces migration cost of abandoning Excel.</div></li>
+        <li><span class="mine-icon">🎯</span><div><strong>For Supermetrics prospects:</strong> "When you build your pipeline or revenue report, do you need NetSuite or Salesforce data alongside your marketing spend?" — surfaces the data silo problem.</div></li>
+        <li><span class="mine-icon">🎯</span><div><strong>Universal:</strong> "How often does your team manually export from NetSuite and reformat in Excel?" — surfaces the time-waste that justifies the investment.</div></li>
+        <li><span class="mine-icon">🎯</span><div><strong>For NS Excel Connector prospects:</strong> "Does your security policy allow live business data to be accessible via a URL that can be forwarded via email or appear in browser history? Have you asked your IT or security team to review the token URL access model?" — immediately surfaces the security risk most enterprise IT teams would flag as unacceptable.</div></li>
+      </ul>
+    </div>
+    <div class="landmine-box">
+      <h3>🛡️ Landmines to DEFUSE (Questions Competitors Set Against Us)</h3>
+      <ul class="landmine-list">
+        <li><span class="mine-icon">🛡️</span><div><strong>"Does it work with Google Sheets?"</strong> Coefficient may plant this. Answer: ExtendInsights is Excel-first by design — your team gets deeper Excel functionality and Power BI integration. Google Sheets users have different tools available to them.</div></li>
+        <li><span class="mine-icon">🛡️</span><div><strong>"Can it connect to 100+ sources?"</strong> Coefficient may plant this. Answer: ExtendInsights covers the 6+ sources that matter most for NetSuite-centric businesses. Breadth without depth means shallow integrations.</div></li>
+        <li><span class="mine-icon">🛡️</span><div><strong>"Is there a free tier?"</strong> Answer: ExtendInsights offers a trial. The question is what "free" costs you in setup time, data limits, and missing NetSuite-specific features.</div></li>
+        <li><span class="mine-icon">🛡️</span><div><strong>"Does it have real financial drill-back to NetSuite?"</strong> Solution 7 may plant this. Be honest: Solution 7's native one-click drill-back is a genuine strength. Redirect: "Solution 7 wins on drill-back depth for pure finance reporting. Where we win is everything else — combining that NetSuite data with Salesforce, Stripe, and HubSpot in the same model, plus writing bulk updates back to NetSuite."</div></li>
+        <li><span class="mine-icon">🛡️</span><div><strong>"Isn't Excel outdated for analytics?"</strong> Equals may plant this. Answer: Excel remains the most widely used analytics tool globally. The question is whether your team needs to rebuild years of institutional knowledge in a new tool.</div></li>
+        <li><span class="mine-icon">🛡️</span><div><strong>"The NS Excel Connector says CloudExtend requires an extra NetSuite license / doesn't work on Mac / requires IT setup…"</strong> These are misleading claims. CloudExtend does not require an extra NetSuite license. CloudExtend is fully functional on Mac. On IT setup: their own Step 1 requires installing a SuiteApp — the exact same requirement they criticize CloudExtend for. Offer to verify any of these claims in writing.</div></li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+</div><!-- /main -->
+
+<div class="page-footer">
+  ExtendInsights by Celigo CloudExtend · Competitive Intelligence · <span id="footer-updated">Last updated March 2026</span> · For internal sales &amp; marketing use only
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     AUTH + DATA ENGINE
+     ─────────────────────────────────────────────────────────────────────────
+     SETUP REQUIRED — fill in AUTH_CONFIG after registering the Azure AD app.
+     See the GitHub-Setup-Guide.md for step-by-step instructions.
+  ═══════════════════════════════════════════════════════════════════════════ -->
+<script>
+'use strict';
+
+/* ── AUTH CONFIG ─────────────────────────────────────────────────────────────
+   Fill these in after completing the Azure AD app registration.
+   See GitHub-Setup-Guide.md → Step 2 for exact instructions.
+   ─────────────────────────────────────────────────────────────────────────── */
+const AUTH_CONFIG = {
+  clientId:  'PASTE_CLIENT_ID_HERE',   // Application (client) ID from Azure AD
+  tenantId:  'PASTE_TENANT_ID_HERE',   // Directory (tenant) ID from Azure AD
+  // Redirect URI — update this to match your GitHub Pages URL exactly
+  // e.g. 'https://celigo.github.io/battlecard/'  (must match Azure AD registration)
+  redirectUri: window.location.origin + window.location.pathname,
+  scopes: ['https://cloudextend.sharepoint.com/AllSites.Read'],
+};
+
+/* ── DATA CONFIG ─────────────────────────────────────────────────────────────
+   SharePoint site and list to read competitor data from.
+   ─────────────────────────────────────────────────────────────────────────── */
+const CONFIG = {
+  siteUrl:  'https://cloudextend.sharepoint.com/sites/Sales2',
+  listName: 'CompetitorData',
+};
+
+/* ── OUR MESSAGING (ExtendInsights column in the matrix) ─────────────────── */
+const OUR_MSG = {
+  MsgTagline:       '"Leading Excel integration app" — powerful, refreshable reports',
+  MsgValueProp:     'Multi-source data + AI + two-way write-back in familiar Excel',
+  MsgAudience:      'Business analysts &amp; ops teams (cross-functional)',
+  MsgDiff:          '6+ data sources + write-back + AI — all in Excel',
+  MsgCategory:      'Excel-native BI / no-code reporting',
+  MsgTone:          'Professional, enterprise-ready, trusted',
+  MsgProof:         'NetSuite SuiteApp partner, Celigo platform, CloudExtend brand',
+  MsgPricing:       'Subscription (contact for pricing)',
+  MsgCTA:           'Free Trial / Get Started',
+  MsgNetSuite:      '✅ Deep — saved searches, write-back, bulk updates',
+  MsgWriteBack:     '✅ Yes — up to 10,000 lines per transaction',
+};
+
+const MATRIX_ROWS = [
+  { label: 'Tagline / Headline',      key: 'MsgTagline'   },
+  { label: 'Core Value Prop',         key: 'MsgValueProp' },
+  { label: 'Primary Audience',        key: 'MsgAudience'  },
+  { label: 'Key Differentiator',      key: 'MsgDiff'      },
+  { label: 'Category Framing',        key: 'MsgCategory'  },
+  { label: 'Tone &amp; Voice',        key: 'MsgTone'      },
+  { label: 'Proof Points',            key: 'MsgProof'     },
+  { label: 'Pricing Model',           key: 'MsgPricing'   },
+  { label: 'Primary CTA',             key: 'MsgCTA'       },
+  { label: 'NetSuite Support',        key: 'MsgNetSuite'  },
+  { label: 'Write-Back to NetSuite',  key: 'MsgWriteBack' },
+];
+
+/* ── MSAL INSTANCE ────────────────────────────────────────────────────────── */
+const msalInstance = new msal.PublicClientApplication({
+  auth: {
+    clientId:    AUTH_CONFIG.clientId,
+    authority:   `https://login.microsoftonline.com/${AUTH_CONFIG.tenantId}`,
+    redirectUri: AUTH_CONFIG.redirectUri,
+  },
+  cache: {
+    cacheLocation: 'sessionStorage',
+    storeAuthStateInCookie: false,
+  },
+});
+
+/* ── AUTH ACTIONS ─────────────────────────────────────────────────────────── */
+async function signIn() {
+  const btn = document.getElementById('btn-signin');
+  const status = document.getElementById('login-status');
+  btn.disabled = true;
+  btn.textContent = 'Opening Microsoft login…';
+  status.textContent = '';
+  try {
+    await msalInstance.loginPopup({ scopes: AUTH_CONFIG.scopes });
+    document.getElementById('login-overlay').style.display = 'none';
+    document.getElementById('btn-signout').style.display = 'inline-block';
+    init();
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg> Sign in with Microsoft`;
+    if (e.errorCode === 'popup_window_error') {
+      status.textContent = '⚠️ Popup blocked — please allow popups for this site and try again.';
+    } else if (e.errorCode === 'user_cancelled') {
+      status.textContent = 'Sign-in cancelled.';
+    } else {
+      status.textContent = `Sign-in error: ${e.message}`;
+    }
+  }
+}
+
+function signOut() {
+  const accounts = msalInstance.getAllAccounts();
+  if (accounts.length > 0) {
+    msalInstance.logoutPopup({ account: accounts[0] }).then(() => {
+      window.location.reload();
+    });
+  }
+}
+
+async function acquireToken() {
+  const accounts = msalInstance.getAllAccounts();
+  if (!accounts.length) throw new Error('NOT_SIGNED_IN');
+  try {
+    const result = await msalInstance.acquireTokenSilent({
+      scopes: AUTH_CONFIG.scopes,
+      account: accounts[0],
+    });
+    return result.accessToken;
+  } catch (e) {
+    // Silent token acquisition failed — try popup
+    const result = await msalInstance.acquireTokenPopup({
+      scopes: AUTH_CONFIG.scopes,
+    });
+    return result.accessToken;
+  }
+}
+
+/* ── SHAREPOINT REST API FETCH ─────────────────────────────────────────────── */
+async function fetchCompetitors() {
+  const token = await acquireToken();
+  const select = [
+    'Title','CompetitorID','ThreatLevel','AccentColor',
+    'Website','Tagline','Positioning','Audience','Pricing',
+    'Strengths','Weaknesses','SpecialWarning','MisleadingClaims',
+    'MsgTagline','MsgValueProp','MsgAudience','MsgDiff','MsgCategory',
+    'MsgTone','MsgProof','MsgPricing','MsgCTA','MsgNetSuite','MsgWriteBack',
+    'PosX','PosY','SortOrder','IsActive','Modified',
+  ].join(',');
+
+  const url = `${CONFIG.siteUrl}/_api/web/lists/getbytitle('${encodeURIComponent(CONFIG.listName)}')/items` +
+    `?$select=${select}&$orderby=SortOrder&$top=50`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+
+  let resp;
+  try {
+    resp = await fetch(url, {
+      headers: {
+        'Accept': 'application/json;odata=verbose',
+        'Authorization': `Bearer ${token}`,
+      },
+      signal: controller.signal,
+    });
+  } catch (e) {
+    clearTimeout(timer);
+    if (e.name === 'AbortError') {
+      throw new Error(`Request timed out after 15 seconds. URL: ${url}`);
+    }
+    throw new Error(`Network error: ${e.message}`);
+  }
+  clearTimeout(timer);
+
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => '');
+    throw new Error(`SharePoint API returned HTTP ${resp.status}. Response: ${txt.slice(0,400)}`);
+  }
+
+  const data = await resp.json();
+  const all = (data.d && data.d.results) || data.value || [];
+
+  return all.filter(c => {
+    const v = c.IsActive;
+    if (v === null || v === undefined) return true;
+    if (typeof v === 'boolean') return v === true;
+    return String(v).toLowerCase() === 'yes';
+  });
+}
+
+/* ── HELPERS ─────────────────────────────────────────────────────────────── */
+function splitLines(str) {
+  if (!str) return [];
+  return str.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+}
+function splitTags(str) {
+  if (!str) return [];
+  return str.split('|').map(s => s.trim()).filter(Boolean);
+}
+function esc(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+function threatClass(level) {
+  if (!level) return 'threat-low';
+  const l = level.toLowerCase();
+  if (l.includes('high'))   return 'threat-high';
+  if (l.includes('medium')) return 'threat-medium';
+  return 'threat-low';
+}
+function threatIcon(level) {
+  if (!level) return '🟢';
+  const l = level.toLowerCase();
+  if (l.includes('high'))   return '🔴';
+  if (l.includes('medium')) return '🟡';
+  return '🟢';
+}
+
+/* ── RENDER: OVERVIEW STATS ────────────────────────────────────────────────── */
+function renderOverviewStats(competitors) {
+  const total  = competitors.length;
+  const high   = competitors.filter(c => (c.ThreatLevel||'').toLowerCase().includes('high')).length;
+  const medium = competitors.filter(c => (c.ThreatLevel||'').toLowerCase().includes('medium')).length;
+  const low    = total - high - medium;
+  document.getElementById('overview-stats').innerHTML = `
+    <div class="stat-card">
+      <div class="label">Our Positioning</div>
+      <div class="value" style="font-size:16px;line-height:1.3;">Excel-native BI &amp; No-Code Reporting</div>
+      <div class="sub">Multi-source · Two-way write-back · AI-powered</div>
+    </div>
+    <div class="stat-card" style="border-left-color:var(--accent)">
+      <div class="label">Primary Audience</div>
+      <div class="value" style="font-size:16px;line-height:1.3;">Business Analysts &amp; Ops Teams</div>
+      <div class="sub">Cross-functional · NetSuite power users</div>
+    </div>
+    <div class="stat-card" style="border-left-color:var(--green)">
+      <div class="label">Key Competitors</div>
+      <div class="value" style="font-size:15px;line-height:1.4;">${total} Tracked</div>
+      <div class="sub">${high} High · ${medium} Medium · ${low} Low threat</div>
+    </div>
+    <div class="stat-card" style="border-left-color:#6B21A8">
+      <div class="label">Top Differentiator</div>
+      <div class="value" style="font-size:15px;line-height:1.3;">Multi-source + Write-back</div>
+      <div class="sub">NetSuite + Salesforce + HubSpot + more in one</div>
+    </div>`;
+}
+
+/* ── RENDER: COMPETITOR CARDS ──────────────────────────────────────────────── */
+function renderCompetitorCards(competitors) {
+  const cards = competitors.map(c => {
+    const color       = esc(c.AccentColor || '#94A3B8');
+    const name        = esc(c.Title || 'Unknown');
+    const website     = esc(c.Website || '');
+    const tagline     = esc(c.Tagline || '');
+    const positioning = esc(c.Positioning || '');
+    const threat      = esc(c.ThreatLevel || 'LOW');
+    const audience    = splitTags(c.Audience);
+    const pricing     = splitTags(c.Pricing);
+    const strengths   = splitLines(c.Strengths);
+    const weaknesses  = splitLines(c.Weaknesses);
+    const warning     = c.SpecialWarning || '';
+    const claims      = splitLines(c.MisleadingClaims);
+
+    const audienceTags  = audience.map(a => `<span class="tag">${esc(a)}</span>`).join('');
+    const pricingTags   = pricing.map(p => {
+      const cls = p.startsWith('❌') || p.startsWith('⚠️') ? 'red' : 'blue';
+      return `<span class="tag ${cls}">${esc(p)}</span>`;
+    }).join('');
+    const strengthItems = strengths.map(s => `<li>${esc(s)}</li>`).join('');
+    const weakItems     = weaknesses.map(w => `<li>${esc(w)}</li>`).join('');
+
+    const warningHtml = warning ? `
+      <div class="comp-section" style="background:#FFF8E7;border-radius:6px;padding:10px 12px;margin-top:12px;border-left:3px solid #F0A500;">
+        <div class="comp-section-label" style="color:#B45309;">⚠️ Security / Warning</div>
+        <p style="font-size:12px;color:#78350F;line-height:1.55;">${esc(warning)}</p>
+      </div>` : '';
+
+    const claimsHtml = claims.length ? `
+      <div class="comp-section" style="background:#FEE2E0;border-radius:6px;padding:10px 12px;margin-top:10px;border-left:3px solid #C0392B;">
+        <div class="comp-section-label" style="color:#C0392B;">🚨 Misleading Claims About CloudExtend</div>
+        <ul style="list-style:none;padding:0;margin:0;">
+          ${claims.map(cl => `<li style="font-size:12px;color:#7F1D1D;padding:3px 0 3px 16px;position:relative;"><span style="position:absolute;left:2px;font-weight:700;">✗</span>${esc(cl)}</li>`).join('')}
+        </ul>
+      </div>` : '';
+
+    return `
+      <div class="comp-card" style="border-top-color:${color}">
+        <div class="comp-header">
+          <div>
+            <div class="comp-name">${name}</div>
+            <div class="comp-tagline">${website ? website + ' · ' : ''}${tagline}</div>
+          </div>
+          <span class="threat-badge ${threatClass(threat)}">${threatIcon(threat)} ${threat} Threat</span>
+        </div>
+        <div class="comp-body">
+          ${positioning ? `<div class="comp-section"><div class="comp-section-label">Positioning</div><p style="font-size:12.5px;color:#475569;">${positioning}</p></div>` : ''}
+          ${audience.length ? `<div class="comp-section"><div class="comp-section-label">Target Audience</div><div class="tag-row">${audienceTags}</div></div>` : ''}
+          ${pricing.length  ? `<div class="comp-section"><div class="comp-section-label">Pricing</div><div class="tag-row">${pricingTags}</div></div>` : ''}
+          ${strengths.length ? `<div class="comp-section"><div class="comp-section-label">Strengths</div><ul class="bullet-list pros">${strengthItems}</ul></div>` : ''}
+          ${weaknesses.length ? `<div class="comp-section"><div class="comp-section-label">Weaknesses</div><ul class="bullet-list cons">${weakItems}</ul></div>` : ''}
+          ${warningHtml}${claimsHtml}
+        </div>
+      </div>`;
+  }).join('');
+  document.getElementById('comp-cards-container').innerHTML = `<div class="comp-grid">${cards}</div>`;
+}
+
+/* ── RENDER: MESSAGING MATRIX ──────────────────────────────────────────────── */
+function renderMessagingMatrix(competitors) {
+  const colWidth   = Math.floor(55 / competitors.length);
+  const headerCells = competitors.map(c => {
+    const color = esc(c.AccentColor || '#64748B');
+    return `<th style="width:${colWidth}%;background:${color};">${esc(c.Title)}</th>`;
+  }).join('');
+  const rows = MATRIX_ROWS.map(row => {
+    const ourVal   = OUR_MSG[row.key] || '—';
+    const compCells = competitors.map(c => `<td>${esc(c[row.key] || '—')}</td>`).join('');
+    return `<tr><td>${row.label}</td><td class="ours">${ourVal}</td>${compCells}</tr>`;
+  }).join('');
+  document.getElementById('matrix-container').innerHTML = `
+    <div class="matrix-wrap">
+      <table class="matrix-table">
+        <thead>
+          <tr>
+            <th style="width:15%">Dimension</th>
+            <th class="ours" style="width:${30-colWidth}%">⭐ ExtendInsights</th>
+            ${headerCells}
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+/* ── RENDER: POSITIONING MAP ───────────────────────────────────────────────── */
+function renderPositioningMap(competitors) {
+  const dots = competitors.map(c => {
+    const x     = parseFloat(c.PosX) || 50;
+    const y     = parseFloat(c.PosY) || 50;
+    const color = esc(c.AccentColor || '#94A3B8');
+    const name  = esc(c.Title || 'Unknown');
+    const labelLeft = x > 60 ? (x - 30) : (x + 4);
+    const labelTop  = y > 60 ? (y - 10) : (y - 8);
+    return `
+      <div class="pos-dot" style="left:${x}%;top:${y}%;background:${color};" title="${name}"></div>
+      <div class="pos-dot-label" style="left:${labelLeft}%;top:${labelTop}%;position:absolute;font-size:11px;font-weight:700;color:${color};background:rgba(255,255,255,.9);padding:2px 6px;border-radius:4px;">${name}</div>`;
+  }).join('');
+  document.getElementById('map-dots').innerHTML = dots;
+  const legendItems = competitors.map(c => {
+    const color = esc(c.AccentColor || '#94A3B8');
+    const name  = esc(c.Title || 'Unknown');
+    const warn  = (c.ThreatLevel||'').toLowerCase().includes('high') ? ' ⚠️' : '';
+    return `<div class="legend-item"><div class="legend-dot" style="background:${color};"></div>${name}${warn}</div>`;
+  }).join('');
+  document.getElementById('map-legend').innerHTML +=
+    `<div class="legend-item"><div class="legend-dot" style="background:var(--accent);"></div>ExtendInsights</div>` + legendItems;
+}
+
+/* ── RENDER: HEADER + FOOTER ───────────────────────────────────────────────── */
+function renderMeta(competitors) {
+  const names = competitors.map(c => c.Title).join(', ');
+  document.getElementById('hdr-subtitle').textContent =
+    `Excel-native BI & no-code reporting · vs. ${names}`;
+  const dates  = competitors.map(c => c.Modified ? new Date(c.Modified) : null).filter(Boolean);
+  const latest = dates.length ? new Date(Math.max(...dates)) : new Date();
+  const label  = latest.toLocaleDateString('en-US', { month:'long', year:'numeric' });
+  document.getElementById('hdr-updated').textContent  = `Updated ${label}`;
+  document.getElementById('footer-updated').textContent = `Last updated ${label}`;
+}
+
+/* ── SHOW ERROR ────────────────────────────────────────────────────────────── */
+function showError(err) {
+  const html = `
+    <div class="sp-error">
+      <h4>⚠️ Could not load competitor data</h4>
+      <p><strong>Error:</strong> ${esc(err.message)}</p>
+      <p style="margin-top:10px;">Possible causes:</p>
+      <ul style="margin:8px 0 0 20px;font-size:13px;color:#7F1D1D;line-height:1.8;">
+        <li>AUTH_CONFIG.clientId or tenantId is still set to the placeholder value</li>
+        <li>The Azure AD app registration is missing the SharePoint API permission</li>
+        <li>The SharePoint List <code>CompetitorData</code> doesn't exist yet</li>
+        <li>Admin consent has not been granted for the SharePoint permission</li>
+      </ul>
+    </div>`;
+  ['overview-stats','comp-cards-container','matrix-container'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+  });
+  document.getElementById('hdr-updated').textContent = 'Data unavailable';
+}
+
+/* ── TAB SWITCHING ─────────────────────────────────────────────────────────── */
+function showTab(id, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + id).classList.add('active');
+  if (btn) btn.classList.add('active');
+}
+
+/* ── LOAD DATA ─────────────────────────────────────────────────────────────── */
+async function init() {
+  try {
+    const competitors = await fetchCompetitors();
+    if (!competitors.length) {
+      throw new Error(`The SharePoint List "${CONFIG.listName}" exists but has no active items.`);
+    }
+    renderMeta(competitors);
+    renderOverviewStats(competitors);
+    renderCompetitorCards(competitors);
+    renderMessagingMatrix(competitors);
+    renderPositioningMap(competitors);
+  } catch (err) {
+    console.error('[Battlecard] Load error:', err);
+    showError(err);
+  }
+}
+
+/* ── BOOTSTRAP ─────────────────────────────────────────────────────────────── */
+(async function bootstrap() {
+  try {
+    await msalInstance.initialize();
+    // Handle redirect response if any
+    await msalInstance.handleRedirectPromise();
+
+    const accounts = msalInstance.getAllAccounts();
+    if (accounts.length > 0) {
+      // Already signed in from a previous session
+      document.getElementById('login-overlay').style.display = 'none';
+      document.getElementById('btn-signout').style.display = 'inline-block';
+      init();
+    } else {
+      // Show login overlay
+      document.getElementById('login-overlay').style.display = 'flex';
+    }
+  } catch (e) {
+    console.error('[Battlecard] Bootstrap error:', e);
+    document.getElementById('login-status').textContent = `Startup error: ${e.message}`;
+  }
+})();
+</script>
+</body>
+</html>
